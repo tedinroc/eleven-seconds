@@ -160,6 +160,15 @@ setLang('zh-CN', false)
   ok(p.sentinels['sentinel-2'].vetoTx === other && p.sentinels['sentinel-2'].verdict === 'veto', '已否决的不会被改成放行；已有的 vetoTx 不被覆盖')
 }
 
+// ---------- 7b. 云端钱包快没测试币：显示「暂停接受新攻击」而不是英文错误 ----------
+{
+  const { f } = fakeFetch([{ status: 503, body: { ok: false, code: 'low_balance', error: 'cloud test MON is running low; new attacks are paused' } }])
+  await attack('evilFee', f)
+  ok(arena.status?.kind === 'error' && /暂停接受新攻击/.test(arena.status.err), '余额不足（503 low_balance）→ 显示暂停接受新攻击')
+  arena.status = null
+  arena.retryUntil = 0
+}
+
 // ---------- 8. 其他评委按的攻击（/api/state 出现新提案）也会结束回放 ----------
 {
   replay.toggle(Date.now())

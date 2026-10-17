@@ -13,6 +13,7 @@ import { createRpc, createFailover } from './rpc.mjs'
 import { accountFromKey, Signer, currentFee } from './signer.mjs'
 import { makeChainView, judgeSafe } from './judge.mjs'
 import { makeReport } from './report.mjs'
+import { fundsCheck, monToWei } from './funds.mjs'
 
 const CARDS = ['evilMint', 'evilOwner', 'evilFee', 'v2', 'v1']
 const EVIL = new Set(['evilMint', 'evilOwner', 'evilFee'])
@@ -86,6 +87,9 @@ function buildStatic(env) {
     ipCooldownMs: num(env.IP_COOLDOWN_SEC, 45) * 1000,
     hourlyMax: num(env.HOURLY_MAX, 40),
     dailyMax: num(env.DAILY_MAX, 300),
+    // fuel gate (src/funds.mjs): about 4 rounds for admin, 3 vetoes per sentinel
+    minAdminWei: monToWei(num(env.MIN_ADMIN_MON, 0.1)),
+    minSentinelWei: monToWei(num(env.MIN_SENTINEL_MON, 0.06)),
     minPriorityWei: BigInt(Math.round(num(env.MIN_PRIORITY_GWEI, 10) * 1e9)),
     simTimeoutMs: num(env.SIM_TIMEOUT_MS, 2500),
     simBudgetMs: num(env.SIM_BUDGET_MS, 5000),
@@ -564,7 +568,7 @@ export class Arena extends DurableObject {
     }
     return {
       ok: ok && problems.length === 0,
-      build: 'ai-report-3',
+      build: 'funds-gate-1',
       lastBlock: this.s.lastBlock,
       cursor: this.s.cursor,
       lastTickAt: e.lastTickAt,
@@ -574,6 +578,7 @@ export class Arena extends DurableObject {
       lastErrorAt: e.lastErrorAt,
       busy: this.isBusy(),
       active: this.s.active ? { id: this.s.active.id ?? null, card: this.s.active.card } : null,
+      funds: fundsCheck(this.s.balances, this.S.cfg),
       problems,
     }
   }
@@ -643,6 +648,7 @@ export class Arena extends DurableObject {
       impl: this.s.impl,
       cards: this.cards(),
       balances: this.s.balances,
+      funds: fundsCheck(this.s.balances, this.S.cfg),
       limits: L,
       active: this.s.active ? { id: this.s.active.id ?? null, card: this.s.active.card, txHash: this.s.active.txHash ?? null, startedAt: this.s.active.startedAt } : null,
       engine: { ...this.health(), ticks: this.s.engine.ticks, startedAt: this.s.engine.startedAt, skippedBlocks: this.s.engine.skipped },
@@ -674,6 +680,9 @@ export class Arena extends DurableObject {
     if (L.ipRetryAfterSec > 0) return deny('one attack per 45 seconds per visitor', L.ipRetryAfterSec)
     if (L.hourRetryAfterSec > 0) return deny('hourly limit reached', L.hourRetryAfterSec)
     if (L.dayRetryAfterSec > 0) return deny('daily limit reached', L.dayRetryAfterSec)
+    if (!this.s.balances || Date.now() - this.s.balances.at > 60_000) await this.refreshBalances().catch((e) => this.noteError('balances', e))
+    const funds = fundsCheck(this.s.balances, this.S.cfg)
+    if (!funds.ok) return json({ ok: false, code: 'low_balance', error: 'cloud test MON is running low; new attacks are paused', low: funds.low }, 503)
 
     // Reserve the single in-flight slot before any await that could let another request in.
     const now = Date.now()

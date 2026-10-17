@@ -51,6 +51,9 @@ GETLOGS_MAX_RANGE = "100"
 IP_COOLDOWN_SEC = "45"
 HOURLY_MAX = "40"
 DAILY_MAX = "300"
+# fuel gate: refuse new cards while any wallet is below this (MON)
+MIN_ADMIN_MON = "0.1"
+MIN_SENTINEL_MON = "0.06"
 # Fees: priority fee floor (gwei); veto/attachReason gas = gas.json limit x GAS_HEADROOM.
 MIN_PRIORITY_GWEI = "10"
 GAS_HEADROOM = "1.25"

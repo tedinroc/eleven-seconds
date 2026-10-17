@@ -9,6 +9,7 @@ import { keccak256, stringToBytes } from 'viem'
 import { RpcError, createFailover } from '../src/rpc.mjs'
 import { broadcastAll } from '../src/signer.mjs'
 import { makeReport } from '../src/report.mjs'
+import { fundsCheck, monToWei } from '../src/funds.mjs'
 
 const WORKER = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const fake = (label, impl) => ({ label, call: async (m, p) => impl(m, p) })
@@ -77,4 +78,16 @@ test('bundle-config refuses the live demo deployment', () => {
   const res = spawnSync(process.execPath, ['scripts/bundle-config.mjs'], { cwd: WORKER, env: { ...process.env, ARENA_DEPLOYMENT: '../../shared/deployments/10143.json' }, encoding: 'utf8' })
   assert.equal(res.status, 1)
   assert.match(res.stderr, /live demo/)
+})
+
+test('fuel gate refuses new cards when any wallet is below its floor, and never blocks on unknown balances', () => {
+  const cfg = { minAdminWei: monToWei(0.1), minSentinelWei: monToWei(0.06) }
+  const bal = (admin, ...s) => ({ at: 0, admin: { wei: monToWei(admin).toString(), mon: String(admin) }, sentinels: s.map((m, i) => ({ index: i + 1, wei: monToWei(m).toString(), mon: String(m) })) })
+  assert.equal(monToWei(0.0135), 13_500_000_000_000_000n)
+  assert.deepEqual(fundsCheck(bal(5.6, 2.7, 2.8, 2.8), cfg), { ok: true, low: [] })
+  const low = fundsCheck(bal(5.6, 0.05, 2.8, 2.8), cfg)
+  assert.equal(low.ok, false)
+  assert.deepEqual(low.low.map((x) => x.who), ['sentinel1'])
+  assert.deepEqual(fundsCheck(bal(0.09, 1, 1, 1), cfg).low.map((x) => x.who), ['admin'])
+  assert.equal(fundsCheck(null, cfg).ok, true)
 })

@@ -343,6 +343,11 @@ export async function attack(card: CardId, f: FetchLike = (u, i) => fetch(u, i),
       arena.status = { kind: 'limited', until: arena.retryUntil }
       return
     }
+    // 云端钱包快没测试币：Worker 暂停接受新攻击（免得送出没人付得起否决的提案）
+    if (o.code === 'low_balance') {
+      arena.status = { kind: 'error', err: t('ar.lowFunds') }
+      return
+    }
     if (!r.ok) throw new Error(str(o.error) ?? str(o.message) ?? `HTTP ${r.status}`)
     const idRaw = o.id ?? o.proposalId
     const id = typeof idRaw === 'number' ? String(idRaw) : (str(idRaw) ?? null)
