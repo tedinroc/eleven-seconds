@@ -1,3 +1,4 @@
 .wrangler/
 src/generated/
 node_modules/
+.dev.vars*

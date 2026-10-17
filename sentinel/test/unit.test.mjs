@@ -15,6 +15,8 @@ import { createEventServer, checkAttachRequest } from '../src/sse.mjs'
 import { readGasLimits } from '../src/vetoer.mjs'
 
 const art = (n) => resolve(REPO_ROOT, `out/${n}.sol/${n}.json`)
+// Locally these tests skip without `forge build`; in CI a missing build is an error, not a silent skip.
+if (process.env.CI && !existsSync(art('EvilOwnerImpl'))) throw new Error('CI: run `forge build` at the repo root before the sentinel tests')
 
 // Every solc selector must be found; at most one short-push extra (0x0000001f: a string-length
 // compare with the dispatcher's shape) is tolerated, since an extra selector is only one more probe.

@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.5
+      - run: forge build
+      - run: forge test
+
+  node:
+    runs-on: ubuntu-latest
+    env:
+      CI: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # sentinel tests read compiled artifacts from out/
+      - run: forge build
+      - name: install
+        run: |
+          for d in reporter sentinel driver web arena/worker; do
+            (cd "$d" && npm ci --no-audit --no-fund)
+          done
+      - name: sentinel
+        run: cd sentinel && npm test
+      - name: reporter
+        run: cd reporter && npm test
+      - name: driver
+        run: cd driver && npm run check
+      - name: arena worker
+        run: cd arena/worker && npm test
+      - name: arena pages
+        run: cd arena/pages && npm test
+      - name: web
+        run: |
+          cd web
+          npx tsc --noEmit -p .
+          npm run selftest
+          npx vite build
+          npx vite build --mode cloud --outDir dist-cloud
+          npx vite build --mode arena --outDir dist-arena
+      - name: arena worker bundle (dry run, no deploy)
+        run: cd arena/worker && npx wrangler deploy --dry-run --outdir .wrangler/dist
