@@ -254,20 +254,7 @@ p, li { font-size: 38px; line-height: 1.5; }
     <p class="footnote frag">AI 把模拟差异翻成中文理由，哈希上链给多签参考 · AI 不在否决路径上</p>
   </section>
 
-  <!-- 5 现场演示 -->
-  <section class="slide demo" data-title="现场演示">
-    <div class="kicker rise"><span class="pulse"></span>现场演示 · Monad 测试网</div>
-    <div class="go rise">切到战情室</div>
-    <ol class="rise">
-      <li><b>01</b>用「泄露的私钥」提交恶意升级</li>
-      <li><b>02</b>3 个哨兵模拟、判定、否决</li>
-      <li><b>03</b>攻击者 execute → ProposalVetoed</li>
-      <li><b>04</b>评委盲选一张卡 · 关掉一个哨兵</li>
-      <li><b>05</b>正常升级 30 块后生效</li>
-    </ol>
-  </section>
-
-  <!-- 6 怎么做到 -->
+  <!-- 5 怎么做到 -->
   <section class="slide" data-title="怎么做到">
     <div class="kicker">怎么做到</div>
     <h2 style="margin-bottom:10px">GuardedAdmin ＋ 3 个独立哨兵</h2>
@@ -306,7 +293,7 @@ p, li { font-size: 38px; line-height: 1.5; }
     <div class="chips"><span class="chip">totalSupply 不变</span><span class="chip">owner 不变</span><span class="chip">转账守恒</span><span class="chip">正常转账必须成功</span><span class="chip" style="border-color:var(--danger);color:var(--danger)">模拟失败 → 否决</span></div>
   </section>
 
-  <!-- 7 为什么是 Monad -->
+  <!-- 6 为什么是 Monad -->
   <section class="slide" data-title="为什么是 Monad">
     <div class="kicker">为什么是 Monad</div>
     <h2 style="margin-bottom:12px">同样 30 个区块</h2>
@@ -324,6 +311,19 @@ p, li { font-size: 38px; line-height: 1.5; }
       <div class="stat rise"><div class="v yellow">约 <span class="count" data-to="0.0135" data-dec="4">0.0135</span></div><div class="k">MON · 单次否决成本<br>123,112 gas × 110 gwei</div></div>
     </div>
     <p class="note">今日测试网：恶意提案 #3–#6、#8、#9 全部 3/3 否决，execute 回 <span class="mono">ProposalVetoed</span>；v2 提案 #2、#7 放行，30 块后生效。BSC 也能做到秒级冷静期；Monad 的优势是粒度更细、确定性最终性（否决不会被重组）、成本低。</p>
+  </section>
+
+  <!-- 7 现场演示 -->
+  <section class="slide demo" data-title="现场演示">
+    <div class="kicker rise"><span class="pulse"></span>现场演示 · Monad 测试网</div>
+    <div class="go rise">切到战情室</div>
+    <ol class="rise">
+      <li><b>01</b>用「泄露的私钥」提交恶意升级</li>
+      <li><b>02</b>3 个哨兵模拟、判定、否决</li>
+      <li><b>03</b>攻击者 execute → ProposalVetoed</li>
+      <li><b>04</b>评委盲选一张卡 · 关掉一个哨兵</li>
+      <li><b>05</b>正常升级 30 块后生效</li>
+    </ol>
   </section>
 
   <!-- 8 范围与下一步 -->
