@@ -140,6 +140,14 @@ function renderStatic() {
 }
 
 /** 语言切换钮：当前语言实色，其他半透明（沿用工具列按钮样式，不加 CSS 规则） */
+/** RPC 主机名只留服务商名（rpc-testnet.monadinfra.com → monadinfra），完整主机名放 title */
+function rpcName(rpc: string | undefined): string {
+  if (!rpc) return '—'
+  if (/^[\d.:[\]]+$/.test(rpc)) return rpc
+  const parts = rpc.split(':')[0].split('.')
+  return parts.length >= 2 ? parts[parts.length - 2] : rpc
+}
+
 function langButton(): string {
   const cur = lang()
   const parts = LANGS.map((l) => (l === cur ? `<b>${LANG_LABEL[l]}</b>` : `<span style="opacity:.45">${LANG_LABEL[l]}</span>`)).join(' / ')
@@ -157,7 +165,7 @@ const BLK_MAX_PX = 84
 function renderTop() {
   const badge =
     MODE === 'testnet' || MODE === 'chain' || MODE === 'arena'
-      ? `<span class="badge live${READ_ONLY ? ' chain' : ''}${ARENA ? ' arena' : ''}">● ${esc(tOr(`badge.${MODE}`, CHAIN.badge))}</span>`
+      ? `<span class="badge live chain${ARENA ? ' arena' : ''}">● ${esc(tOr(`badge.${MODE}`, CHAIN.badge))}</span>`
       : MODE === 'replay'
         ? `<span class="badge grey">${t('badge.replay')}</span>`
         : `<span class="badge grey dashed">${t('badge.fake')}</span>`
@@ -198,17 +206,40 @@ function renderTop() {
       .join('')
     patch(
       'toolbar',
-      `<span class="ro">${t('tb.readonly')}${MODE === 'chain' ? ` <a class="ro-arena" href="${esc(arenaHref())}" target="_blank" rel="noopener">${t('tb.arena')}</a>` : ''}</span><button data-act="table">${t('tb.table')}</button><button data-act="report">${t('tb.reportHash')}</button><button data-act="replay" class="rp-btn${replay.paused ? ' paused' : ''}" title="${esc(`${replay.paused ? t('rp.resumeFull') : t('rp.pauseFull')} · ${t('rp.btnTitle')}`)}" aria-label="${esc(replay.paused ? t('rp.resumeFull') : t('rp.pauseFull'))}">${replay.paused ? t('rp.resume') : t('rp.pause')}</button>${langButton()}` +
-        (ids.length ? `<span class="hint">${t('tb.recent')}${chips}</span>` : `<span class="hint">${chainHealth.loadedRecent ? t('tb.noProposals') : t('tb.loadingRecent')}</span>`),
+      toolbarRows(
+        t('tb.readonly'),
+        `<a class="ro-arena" href="${esc(arenaHref())}" target="_blank" rel="noopener">${t('tb.arena')}</a>`,
+        `<button data-act="table">${t('tb.table')}</button><button data-act="report">${t('tb.report')}</button>${replayButton()}${langButton()}` +
+          (ids.length ? chips : `<span class="tb-recent">${chainHealth.loadedRecent ? t('tb.noProposals') : t('tb.loadingRecent')}</span>`),
+      ),
     )
     return
   }
+  // 现场操作版（testnet／fake）：与云端、arena 同一套三行工具列；攻击卡与 arena 同一组按钮，键盘 1–4 照旧
+  const cards = CARDS.map((c, i) => {
+    const title = t('ar.cardTitle', { name: c.name, desc: cardDesc(c), k: i + 1 })
+    return `<button data-act="p:${c.id}" class="atk ${c.expect}" title="${esc(title)}">${esc(t(`ar.card.${c.id}` as never))}</button>`
+  }).join('')
   patch(
     'toolbar',
-    `<button data-act="judge">${t('tb.judge')}</button><button data-act="table">${t('tb.table')}</button><button data-act="report">${t('tb.report')}</button>` +
-      (MODE === 'fake' ? `<button data-act="kill">${t('tb.kill')}</button>` : `<button data-act="approve">${t('tb.approve')}</button>`) +
-      `<span class="hint">${t('tb.propose')}<button data-act="p:evilMint">${t('tb.p1')}</button><button data-act="p:evilOwner">${t('tb.p2')}</button><button data-act="p:evilFee">${t('tb.p3')}</button><button data-act="p:v2">${t('tb.p4')}</button>${langButton()}</span>`,
+    toolbarRows(
+      t('tb.lede'),
+      `<button data-act="judge" class="atk judge">${t('tb.judge')}</button>${cards}`,
+      `<button data-act="table">${t('tb.table')}</button><button data-act="report">${t('tb.report')}</button>` +
+        (MODE === 'fake' ? `<button data-act="kill">${t('tb.kill')}</button>` : `<button data-act="approve">${t('tb.approve')}</button>`) +
+        langButton(),
+    ),
   )
+}
+
+/** 三种模式共用的工具列：说明一行／主要动作一行／次要按钮＋最近提案一行（arena 在中间多一行送出状态） */
+function toolbarRows(lede: string, actions: string, rest: string, status = ''): string {
+  return `<span class="ro ar-lede">${lede}</span><div class="atk-row" role="group">${actions}</div>${status}<span class="hint ar-hint">${rest}</span>`
+}
+
+function replayButton(): string {
+  const full = replay.paused ? t('rp.resumeFull') : t('rp.pauseFull')
+  return `<button data-act="replay" class="rp-btn${replay.paused ? ' paused' : ''}" title="${esc(`${full} · ${t('rp.btnTitle')}`)}" aria-label="${esc(full)}">${replay.paused ? t('rp.resume') : t('rp.pause')}</button>`
 }
 
 // ---------- ?mode=arena 工具列：说明一句＋四张攻击卡＋送出状态＋T/R/P/语言＋最近提案 ----------
@@ -261,11 +292,11 @@ function arenaToolbar(): string {
       return `<button data-act="sel:${esc(id)}" class="${(RF ? RF.tl.id : store.activeId) === id ? 'on' : ''}"><b class="${cls}">#${esc(id)}</b> ${esc(st !== undefined ? statusChip(st) : '…')}</button>`
     })
     .join('')
-  return (
-    `<span class="ro ar-lede">${t('ar.lede')}</span>` +
-    `<div class="atk-row" role="group" aria-label="${esc(t('ar.lede'))}">${cards}</div>` +
-    arenaStatus(now) +
-    `<span class="hint ar-hint"><button data-act="table">${t('tb.table')}</button><button data-act="report">${t('r.title')}</button><button data-act="replay" class="rp-btn${replay.paused ? ' paused' : ''}" title="${esc(`${replay.paused ? t('rp.resumeFull') : t('rp.pauseFull')} · ${t('rp.btnTitle')}`)}" aria-label="${esc(replay.paused ? t('rp.resumeFull') : t('rp.pauseFull'))}">${replay.paused ? t('rp.resume') : t('rp.pause')}</button>${langButton()}${chips}</span>`
+  return toolbarRows(
+    t('ar.lede'),
+    cards,
+    `<button data-act="table">${t('tb.table')}</button><button data-act="report">${t('tb.report')}</button>${replayButton()}${langButton()}${chips}`,
+    arenaStatus(now),
   )
 }
 
@@ -419,7 +450,7 @@ function vetoStage(sp: SentinelOnProposal): number {
 function renderSentinelChain(s: string, p: Proposal | null) {
   const n = s.split('-')[1]
   const g = CARD_GUARDIAN.get(s)
-  let verdict = `<span class="dim">${t('s.noAction')}</span>`
+  let verdict = `<span class="dim">${p ? t('s.noAction') : t('s.standby')}</span>`
   let veto = ''
   const sp = p?.sentinels[s]
   // arena：云端哨兵回报的模拟毫秒（/api/state）
@@ -443,7 +474,7 @@ function renderSentinelChain(s: string, p: Proposal | null) {
   patch(
     `s-${s}`,
     `<div class="scard-in">
-      <div class="s-head"><b>${t('s.name', { n })}</b> ${ARENA ? (arena.health[s]?.online === false ? `<span class="chip off">${t('s.offline')}</span>` : `<span class="chip on">${t('ar.cloud')}</span>`) + ' ' : ''}<span class="chip on">guardian</span> <span class="dim">${addrLink(g, 4)}</span></div>
+      <div class="s-head"><b>${t('s.name', { n })}</b> ${ARENA ? (arena.health[s]?.online === false ? `<span class="chip off">${t('s.offline')}</span>` : `<span class="chip on">${t('ar.cloud')}</span>`) : `<span class="chip on">${t('s.site')}</span>`} <span class="chip on">guardian</span> <span class="dim">${addrLink(g, 4)}</span></div>
       <div class="s-verdict">${verdict}</div>
       <div class="s-veto">${veto}</div>
     </div>`,
@@ -456,9 +487,11 @@ function renderSentinel(s: string, p: Proposal | null, now: number) {
   const online = store.isOnline(s, now)
   const n = s.split('-')[1]
   const status = online ? `<span class="chip on">${t('s.online')}</span>` : `<span class="chip off">${t('s.offline')}</span>`
+  // 测试网上 guardian 地址与云端、arena 同样显示（假事件／本机重演的地址不是测试网的，不显示）
+  const g = ON_TESTNET ? CARD_GUARDIAN.get(s) : undefined
   const meta =
     online && h
-      ? `${t('s.meta', { b: h.lastBlock ?? '?', rpc: esc(h.rpc || '—') })}${h.ok ? '' : t('s.rpcBad')}`
+      ? `${t('s.meta', { b: h.lastBlock ?? '?', rpc: esc(rpcName(h.rpc)) })}${h.ok ? '' : t('s.rpcBad')}`
       : h
         ? t('s.noHeartbeat', { s: ((now - h.lastTs) / 1000).toFixed(1) })
         : t('s.never')
@@ -489,7 +522,7 @@ function renderSentinel(s: string, p: Proposal | null, now: number) {
   patch(
     `s-${s}`,
     `<div class="scard-in ${online ? '' : 'offline'}">
-      <div class="s-head"><b>${t('s.name', { n })}</b> ${status} <span class="dim">${meta}</span></div>
+      <div class="s-head"><b>${t('s.name', { n })}</b> ${status} ${g ? `<span class="chip on">guardian</span> <span class="dim">${addrLink(g, 4)}</span> ` : ''}<span class="dim" title="${esc(h?.rpc ?? '')}">${meta}</span></div>
       <div class="s-verdict">${verdict}</div>
       <div class="s-veto">${veto}</div>
       ${online ? '' : `<div class="off-stamp">${t('s.offStamp')}</div>`}

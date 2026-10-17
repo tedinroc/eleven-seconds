@@ -1184,18 +1184,19 @@ html.layout-stack .toolbar .hint button {
 html.layout-stack .toolbar .ro {
   text-align: left;
 }
-.toolbar .ro .ro-arena {
+/* 云端只读版的主要动作：去 arena（与攻击卡同一行、同样大小） */
+.toolbar .ro-arena {
   display: inline-block;
-  margin-left: 10px;
-  padding: 2px 12px;
-  border: 1px solid var(--live);
-  border-radius: 999px;
+  font: 700 15px var(--sans);
+  padding: 4px 14px;
+  border: 2px solid var(--live);
+  border-radius: 6px;
   background: #241c4a;
   color: var(--fg);
-  font-weight: 700;
   text-decoration: none;
+  white-space: nowrap;
 }
-.toolbar .ro .ro-arena:hover {
+.toolbar .ro-arena:hover {
   background: #33287a;
 }
 
@@ -1631,6 +1632,14 @@ html.layout-stack .rp-pill {
 .toolbar .ar-hint button {
   margin-left: 0;
 }
+.toolbar .tb-recent {
+  margin-left: 6px;
+  white-space: nowrap;
+}
+.toolbar button.atk.judge {
+  border-color: var(--live);
+  background: #241c4a;
+}
 .ar-st {
   width: 100%;
   font-size: 13px;
@@ -1677,4 +1686,18 @@ html.layout-stack .ar-st {
   font-size: 15px;
   line-height: 1.35;
   text-align: left;
+}
+/* 手机／直式：评委出题与「去云端互动版」各占一整行，攻击卡维持 2×2 */
+html.layout-stack .toolbar button.atk.judge,
+html.layout-stack .toolbar .ro-arena {
+  grid-column: 1 / -1;
+  min-height: 52px;
+  font-size: 17px;
+  text-align: center;
+  white-space: normal;
+}
+html.layout-stack .toolbar .ro-arena {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
