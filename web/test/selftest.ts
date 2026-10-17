@@ -1,12 +1,15 @@
 // 前端逻辑自测（不开浏览器）：在 Node 里跑 ?mode=fake 的假事件播放器，检查画面要用的实测值。
 //   npm run selftest
 import './stub'
+import { installDom } from './domstub'
 import { CONFIG } from '../src/config'
 import { blockFontPx, explorerUrl, fmtGwei, fmtMon, plausibleBlockMs, reportAutoVisible, vetoMetrics } from '../src/derive'
-import { playFake, startFake } from '../src/fake'
+import { playFake, startFake, toggleFakeOffline } from '../src/fake'
+import { DICT, initLang, lang, LANG_LABEL, LANGS, setLang, tm, type Lang } from '../src/i18n'
 import { SENTINELS } from '../src/runtime'
 import { store, type Proposal } from '../src/store'
 import { RULE_TEXT } from '../src/types'
+import { judge, render, ui } from '../src/ui'
 
 let fails = 0
 function ok(cond: unknown, msg: string) {
@@ -116,6 +119,106 @@ ok(RULE_TEXT.R3B_THIRD_PARTY_FUNDS?.length > 0 && RULE_TEXT.R9_NEW_OPCODES?.leng
   ok(tail.some((l) => l.type === 'totally_new_type' && l.text.includes('未知事件')), '没有 id 的未知事件也列进事件串流')
   ok(tail.filter((l) => l.type === 'veto_failed').length === 2, '同类未知事件不会被去重吞掉')
   ok(store.proposals.get(id1)!.sentinels['sentinel-2']?.receipt !== undefined, '未知事件不改动提案状态')
+}
+
+// ---------- 4. 多语系（zh-CN／zh-TW／en） ----------
+{
+  const dom = installDom()
+  const CJK = /[㐀-鿿　-〿＀-￯]/
+  // 简体专用字（繁体不会出现）：拿来抓 zh-TW 漏翻
+  const SIMPLIFIED_ONLY = /[区块链测试网报这个为发时间实现评题机连线执务应总转账没权变态错误载读据击两导点让说计规则节预开关显设证资产处数长额签码详图际断续单传备换认话该调钥钱闭难页验类给满离线异议级]/
+  // 报告正文（reporter 原文，不翻）与语言钮（简/繁/EN 本来就是各语言自己的字）不算
+  const strip = (h: string) => h.replace(/<div class="r-body[^"]*"><div>[\s\S]*?<\/div><\/div>/g, '').replace(/<button data-lang[^>]*>[\s\S]*?<\/button>/g, '')
+  const plain = (h: string) => strip(h).replace(/<[^>]+>/g, ' ')
+  const missing = (words: string[], text: string) => words.filter((w) => !text.includes(w))
+  const lack = (words: string[], text: string) => {
+    const m = missing(words, text)
+    return m.length ? `（缺：${m.join('、')}）` : ''
+  }
+
+  // 字典本身：en 不含中文字元，zh-TW 不含简体专用字（含 chain 模式才会出现的句子）
+  const enLeak = Object.entries(DICT.en).filter(([, v]) => CJK.test(v))
+  ok(enLeak.length === 0, `en 字典没有中文字元${enLeak.length ? '：' + enLeak.slice(0, 3).map(([k]) => k).join(', ') : ''}`)
+  const twLeak = Object.entries(DICT['zh-TW']).filter(([, v]) => SIMPLIFIED_ONLY.test(v))
+  ok(twLeak.length === 0, `zh-TW 字典没有简体专用字${twLeak.length ? '：' + twLeak.slice(0, 3).map(([k, v]) => `${k}=${v}`).join(', ') : ''}`)
+  const zhKeys = Object.keys(DICT['zh-CN'])
+  const mayBeEmpty = new Set(['tb.recent']) // en 省掉「最近提案：」标签，五颗钮才排得进一行
+  ok(LANGS.every((l) => zhKeys.every((k) => typeof DICT[l][k] === 'string' && (DICT[l][k].length > 0 || mayBeEmpty.has(k)))), '三种语言的字典 key 一样齐（含规则、种类、卡片、阶段、状态）')
+  ok(['R1_TOTAL_SUPPLY', 'R2_OWNER', 'R3_TRANSFER_CONSERVATION', 'R3B_THIRD_PARTY_FUNDS', 'R9_NEW_OPCODES'].every((r) => LANGS.every((l) => !!DICT[l][`rule.${r}`])), '规则 R1–R9／R3B 三种语言都有说明')
+
+  // 选语言：?lang= 优先，其次 localStorage，默认 zh-CN
+  const loc = globalThis.location as unknown as { search: string }
+  const search0 = loc.search
+  loc.search = '?mode=fake'
+  ok(initLang() === 'zh-CN', '默认 zh-CN')
+  dom.mem.set('eleven.lang', 'zh-TW')
+  ok(initLang() === 'zh-TW', 'localStorage 记住上次的语言')
+  loc.search = '?mode=fake&lang=en'
+  ok(initLang() === 'en', '?lang=en 优先于 localStorage')
+  loc.search = '?mode=fake&lang=xx'
+  ok(initLang() === 'zh-TW', '不认识的 ?lang= 退回 localStorage')
+  loc.search = search0
+  dom.mem.clear()
+  setLang('zh-CN', false)
+
+  // 画面需要的状态：离线哨兵、main.ts 写的中文句子（评委状态与 driver 串流）
+  toggleFakeOffline('sentinel-3')
+  await sleep(CONFIG.heartbeatTimeoutMs + 300)
+  judge.status = '已送出（假事件）。判定后翻牌。'
+  store.log('driver', 'propose', '送出提案 #9（EvilMint） tx 0x12345678…', 'info')
+  const nProps = store.proposals.size
+  const nLines = store.stream.length
+  const screens = (): string => {
+    let all = ''
+    for (const id of [id1, id2]) {
+      store.activeId = id
+      ui.judgeOpen = true
+      ui.tableOpen = true
+      ui.reportOpen = true
+      render()
+      all += dom.html()
+      ui.judgeOpen = ui.tableOpen = ui.reportOpen = false
+      ui.reportDismissedFor = id
+      render()
+      all += dom.html()
+    }
+    return all
+  }
+  // 串流句子（画面只显示最后 4 行，所以直接拿 store.stream 里的模板来套）
+  const simLine = store.stream.find((l) => l.type === 'sim_result' && l.text.includes(`#${id1}`))!
+  const failLine = store.stream.find((l) => l.type === 'veto_failed')!
+  const lineIn = {} as Record<Lang, string>
+  const out = {} as Record<Lang, string>
+  for (const l of LANGS) {
+    setLang(l, false)
+    out[l] = screens()
+    lineIn[l] = [simLine, failLine].map((x) => (x.msg ? tm(x.msg) : x.text)).join('\n')
+  }
+  ok(store.proposals.size === nProps && store.stream.length === nLines, '切换语言不丢提案、不丢事件串流')
+  ok(lang() === 'en' && dom.doc.title === 'Eleven Seconds · War Room' && dom.doc.documentElement.lang === 'en', 'document.title 与 <html lang> 跟着语言走')
+
+  const cn = plain(out['zh-CN'])
+  const cnWords = ['否决', '当前区块', '冷静期', '哨兵 1', '事件串流', '评委出题', '同样等 30 个区块', '陌生地址改变了总供应量']
+  ok(missing(cnWords, cn).length === 0, `zh-CN 维持原有文字（否决／当前区块／冷静期…）${lack(cnWords, cn)}`)
+  ok(simLine.msg !== undefined && lineIn['zh-CN'] === `${simLine.text}\n${failLine.text}`, 'zh-CN 串流句子套模板后与原文一字不差')
+
+  const tw = plain(out['zh-TW'])
+  const twWords = ['否決', '目前區塊', '冷靜期', '評審出題', '事件串流', '陌生地址改變了總供應量', '已送出（假事件）。判定後翻牌。', '送出提案 #9（EvilMint）']
+  ok(missing(twWords, tw).length === 0, `zh-TW 关键字串（否決／區塊／評審…）${lack(twWords, tw)}`)
+  ok(lineIn['zh-TW'].includes(`判定否決 #${id1}：R1_TOTAL_SUPPLY（模擬`) && lineIn['zh-TW'].includes('否決交易失敗：'), 'zh-TW 串流句子套模板')
+  const twBad = [...new Set(tw.match(new RegExp(SIMPLIFIED_ONLY.source, 'g')) ?? [])]
+  ok(twBad.length === 0, `zh-TW 画面没有简体专用字${twBad.length ? '：' + twBad.join('') : ''}`)
+
+  const en = plain(out.en)
+  const enWords = ['Veto', 'blocks', 'Attacker', 'Sentinel 1', 'Event stream', 'Judge picks a card', 'The same 30-block wait', 'Cooldown', 'OFFLINE', 'stranger changed total supply']
+  ok(missing(enWords, en).length === 0, `en 关键字串（Veto／blocks／Attacker…）${lack(enWords, en)}`)
+  ok(lineIn.en.includes(`Veto #${id1}: R1_TOTAL_SUPPLY (sim`) && lineIn.en.includes('Veto tx failed: #') && !CJK.test(lineIn.en.replace('nonce too low', '')), 'en 的 store 句子与未知事件都套了模板')
+  ok(en.includes('Sent (simulated). The card flips after the verdict.') && en.includes('Proposal #9 sent (EvilMint)'), 'en 也翻了 main.ts 写的句子（评委状态、driver 串流）')
+  const enBad = [...new Set(en.match(new RegExp(CJK.source, 'g')) ?? [])]
+  ok(enBad.length === 0, `en 画面没有中文字元（报告正文除外）${enBad.length ? '：' + enBad.join('') : ''}`)
+  ok(/<button data-lang[^>]*>[\s\S]*简[\s\S]*繁[\s\S]*EN/.test(out.en) && Object.values(LANG_LABEL).join('/') === '简/繁/EN', '工具列有「简 / 繁 / EN」切换钮')
+  ok(/class="r-body"><div>[^<]*[一-鿿]/.test(out.en) && out.en.includes('original: Chinese'), 'en 下报告正文维持原文，旁边标示原文语言')
+  setLang('zh-CN', false)
 }
 
 console.log(fails ? `\n${fails} 项失败` : '\n全部通过')

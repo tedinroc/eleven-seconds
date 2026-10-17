@@ -1,6 +1,7 @@
 import './style.css'
 import { blocks } from './chain'
 import { playFake, startFake, toggleFakeOffline } from './fake'
+import { cycleLang, initLang } from './i18n'
 import { checkVerified, fillProposeTx } from './lookup'
 import { startChainWatch, selectProposal } from './chainwatch'
 import { MODE, READ_ONLY } from './runtime'
@@ -9,6 +10,7 @@ import { store } from './store'
 import { CARDS, type CardId } from './types'
 import { judge, mountSkeleton, render, reportVisible, ui } from './ui'
 
+initLang()
 mountSkeleton()
 
 let dirty = true
@@ -173,6 +175,7 @@ document.addEventListener('keydown', (ev) => {
   else if (k === 'r') act('report')
   else if (k === 'k') act(ev.shiftKey ? 'revive' : 'kill')
   else if (k === 'a') act('approve')
+  else if (k === 'l') cycleLang()
   else if (k === 'escape') {
     ui.judgeOpen = false
     ui.tableOpen = false

@@ -94,8 +94,9 @@ export const CONFIG = {
 
   /** S5 对照表的参考出块时间（外链数据，非本系统实测）；Monad 一行永远显示实测值 */
   referenceChains: [
-    { name: '以太坊', blockSec: 12, note: '约 12 秒/块' },
-    { name: 'BSC', blockSec: 0.45, note: '约 0.45 秒/块' },
+    // id 对应 i18n 的 ref.<id>（链名）；note 为 zh-CN 原文，其他语言由 blockSec 套模板
+    { id: 'eth', name: '以太坊', blockSec: 12, note: '约 12 秒/块' },
+    { id: 'bsc', name: 'BSC', blockSec: 0.45, note: '约 0.45 秒/块' },
   ],
   /** 只在 driver /deployments 拿不到时才用；画面优先用部署档里的 delayBlocks */
   delayBlocks: 30,

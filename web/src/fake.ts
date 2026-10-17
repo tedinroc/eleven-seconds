@@ -3,6 +3,7 @@
 // 画面上所有数字都会标「假数据」，徽章是灰色「假事件演示」。
 import { keccak256, stringToHex } from 'viem'
 import { blocks } from './chain'
+import { lang, type Lang } from './i18n'
 import { SENTINELS } from './runtime'
 import { store } from './store'
 import { CARDS, type CardId, type WarEvent } from './types'
@@ -102,11 +103,27 @@ const CHECKS: Record<CardId, { rule: string | null; checks: { name: string; befo
   },
 }
 
-const REPORTS: Record<CardId, string> = {
+// 假 reporter 按提案当下的画面语言「生成」报告；真 reporter 的报告正文一律原文显示。
+const REPORTS_ZH_CN: Record<CardId, string> = {
   evilMint: '新实现的 mint 不检查调用者，模拟中陌生地址直接增发，总供应量被改变。这等于任何人都能凭空印币。建议多签维持否决，并检查 admin 钥匙是否外泄。',
   evilOwner: '新实现新增 claimOwner()，模拟中陌生地址调用后成为 owner。攻击者可借此接管代币权限。建议多签维持否决，并轮换 admin 钥匙。',
   evilFee: '函数签名与原版完全一致，但模拟转账时收款方少收 10%，差额流向 owner。只比对 bytecode 规则抓不到这种行为。建议多签维持否决。',
   v2: '新实现只多一个 version()，模拟中总供应量、owner 与转账守恒全部不变。依目前检查可以放行，冷静期满后照常生效。',
+}
+const REPORTS: Record<Lang, Record<CardId, string>> = {
+  'zh-CN': REPORTS_ZH_CN,
+  'zh-TW': {
+    evilMint: '新實作的 mint 不檢查呼叫者，模擬中陌生地址直接增發，總供應量被改變。這等於任何人都能憑空印幣。建議多簽維持否決，並檢查 admin 金鑰是否外洩。',
+    evilOwner: '新實作新增 claimOwner()，模擬中陌生地址呼叫後成為 owner。攻擊者可藉此接管代幣權限。建議多簽維持否決，並輪換 admin 金鑰。',
+    evilFee: '函式簽章與原版完全一致，但模擬轉帳時收款方少收 10%，差額流向 owner。只比對 bytecode 的規則抓不到這種行為。建議多簽維持否決。',
+    v2: '新實作只多一個 version()，模擬中總供應量、owner 與轉帳守恆全部不變。依目前檢查可以放行，冷靜期滿後照常生效。',
+  },
+  en: {
+    evilMint: 'The new mint does not check the caller; in simulation a stranger minted directly and total supply changed. Anyone could print tokens. Recommend the multisig keep the veto and check whether the admin key leaked.',
+    evilOwner: 'The new impl adds claimOwner(); in simulation a stranger called it and became owner, taking over token permissions. Recommend the multisig keep the veto and rotate the admin key.',
+    evilFee: 'Function signatures match the original, but in a simulated transfer the recipient got 10% less and the difference went to owner. Bytecode-only rules miss this. Recommend the multisig keep the veto.',
+    v2: 'The new impl only adds version(); total supply, owner and transfer conservation are unchanged in simulation. Current checks allow it; it goes live after the cooldown.',
+  },
 }
 
 const PATHS: ('ws' | 'poll')[] = ['ws', 'ws', 'poll']
@@ -165,7 +182,7 @@ export function playFake(card: CardId) {
       })
     })
     // reporter：第一个 sim_result 之后逐字串流
-    const text = REPORTS[card]
+    const text = REPORTS[lang()][card]
     const start = 900
     ;[...text].forEach((ch, k) => later(start + k * 35, () => send('report_token', 'reporter', { id, delta: ch })))
     const doneAt = start + text.length * 35 + 100

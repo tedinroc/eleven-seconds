@@ -20,6 +20,8 @@ talks to Monad testnet directly (WS `monadNewHeads` + GuardedAdmin `logs`, falli
 left for the attacker, the veto cost from the receipt (`gasUsed × effectiveGasPrice`) and MonadVision links.
 It does not propose anything: live proposals are triggered by the operator, and the AI report text stays on
 the operator's machine (only its on-chain `reportHash` / `attachReason` tx is shown).
+The war room speaks 简体中文, 繁體中文 and English (toolbar button, `L` key or `?lang=zh-CN|zh-TW|en`) and
+adapts to phones and tablets with a stacked, scrollable layout; wide landscape screens keep the 16:9 stage.
 Rebuild: `cd web && npm run build:cloud` (bundles `shared/` deployment, ABI and rule hashes), then
 `npx -y wrangler@3 pages deploy dist --project-name eleven-seconds --branch main`.
 

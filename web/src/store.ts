@@ -1,6 +1,7 @@
 // 前端状态：合并 3 个哨兵、driver、reporter 的事件，按 proposal id 去重。
 import { CONFIG } from './config'
 import { MODE, SENTINELS } from './runtime'
+import { msg, tIn, type Msg } from './i18n'
 import { EXTRA_EVENT_TEXT, isKnownEventType, normRule, toNum, type CardId, type Check, type WarEvent } from './types'
 
 export interface SentinelOnProposal {
@@ -60,7 +61,10 @@ export interface StreamLine {
   ts: number
   source: string
   type: string
+  /** zh-CN 原文（自测与旧呼叫端用） */
   text: string
+  /** 模板 key＋参数：画面按当前语言重新套模板；没有就显示 text（见 i18n.tLegacy） */
+  msg?: Msg
   level: 'info' | 'good' | 'bad' | 'warn'
 }
 
@@ -132,16 +136,22 @@ export class Store {
   /** 未知或新增的事件类型：照实列进事件串流（截短），不改任何提案状态，也不会让页面出错。 */
   private logUnknown(source: string, e: WarEvent, id: string | null, ts: number) {
     const type = String(e.type).slice(0, 40)
-    const label = EXTRA_EVENT_TEXT[type] ?? `未知事件 ${type}`
+    const label = isExtra(type) ? msg(`evt.${type}`) : msg('ev.unknown', { type })
     const parts: string[] = []
     if (id) parts.push(`#${id}`)
     const rule = normRule(typeof e.rule === 'string' ? e.rule : null)
     if (rule) parts.push(rule)
     if (typeof e.txHash === 'string') parts.push(`tx ${short(e.txHash)}`)
-    const msg = typeof e.error === 'string' ? e.error : typeof e.text === 'string' ? e.text : ''
-    if (msg) parts.push(msg.length > 120 ? msg.slice(0, 120) + '…' : msg)
+    const err = typeof e.error === 'string' ? e.error : typeof e.text === 'string' ? e.text : ''
+    if (err) parts.push(err.length > 120 ? err.slice(0, 120) + '…' : err)
     const failed = /fail|error|revert/i.test(type) || e.ok === false
-    this.log(source, type, `${label}${parts.length ? '：' + parts.join(' ') : ''}`, failed ? 'warn' : 'info', ts)
+    this.logT(source, type, parts.length ? msg('ev.extra', { label, parts: parts.join(' ') }) : label, failed ? 'warn' : 'info', ts)
+  }
+
+  /** 事件串流一句：存模板（换语言时重画），text 留 zh-CN 原文 */
+  logT(source: string, type: string, m: Msg, level: StreamLine['level'] = 'info', ts = Date.now()) {
+    this.stream.push({ ts, source, type, text: tIn('zh-CN', m.k, m.p), msg: m, level })
+    if (this.stream.length > 80) this.stream.shift()
   }
 
   log(source: string, type: string, text: string, level: StreamLine['level'] = 'info', ts = Date.now()) {
@@ -206,7 +216,7 @@ export class Store {
     // 模式检查：测试网与本机数字不得混在一起
     if (MODE !== 'fake' && e.mode && e.mode !== MODE) {
       if (!this.mixWarned) {
-        this.log(source, e.type, `收到 mode=${e.mode} 的事件，与当前模式不符，已丢弃（不混算）`, 'warn', ts)
+        this.logT(source, e.type, msg('ev.modeMix', { m: String(e.mode) }), 'warn', ts)
         this.mixWarned = true
         this.emit()
       }
@@ -264,12 +274,12 @@ export class Store {
           s.seenTs = ts
           s.path = e.path
         }
-        this.log(source, e.type, `看到提案 #${id}（${e.path ?? '?'}），提案块 ${p.proposeBlock ?? '?'}，可执行块 ${p.readyBlock ?? '?'}`, 'info', ts)
+        this.logT(source, e.type, msg('ev.seen', { id, path: e.path ?? '?', pb: p.proposeBlock ?? '?', rb: p.readyBlock ?? '?' }), 'info', ts)
         break
       }
       case 'sim_started':
         if (s) s.simStartedTs = ts
-        this.log(source, e.type, `开始模拟 #${id}`, 'info', ts)
+        this.logT(source, e.type, msg('ev.simStart', { id }), 'info', ts)
         break
       case 'sim_result': {
         if (s) {
@@ -281,7 +291,7 @@ export class Store {
           s.simMs = typeof e.simMs === 'number' ? e.simMs : undefined
         }
         const veto = e.verdict === 'veto'
-        this.log(source, e.type, veto ? `判定否决 #${id}：${normRule(e.rule)}（模拟 ${e.simMs ?? '?'} ms）` : `判定放行 #${id}（模拟 ${e.simMs ?? '?'} ms）`, veto ? 'bad' : 'good', ts)
+        this.logT(source, e.type, veto ? msg('ev.simVeto', { id, rule: String(normRule(e.rule)), ms: e.simMs ?? '?' }) : msg('ev.simPass', { id, ms: e.simMs ?? '?' }), veto ? 'bad' : 'good', ts)
         break
       }
       case 'veto_sent':
@@ -289,7 +299,7 @@ export class Store {
           s.vetoTx = e.txHash
           s.vetoRpcs = e.rpcs
         }
-        this.log(source, e.type, `送出否决 #${id} tx ${short(e.txHash)}（${(e.rpcs ?? []).length} 路）`, 'warn', ts)
+        this.logT(source, e.type, msg('ev.vetoSent', { id, tx: short(e.txHash), n: (e.rpcs ?? []).length }), 'warn', ts)
         break
       case 'veto_receipt':
         if (s) {
@@ -305,25 +315,25 @@ export class Store {
             extra: e.extra && typeof e.extra === 'object' ? e.extra : undefined,
           }
         }
-        this.log(source, e.type, `否决收据 #${id}：块 ${toNum(e.block) ?? '?'}，状态 ${e.status}，耗时 ${e.latencyMs ?? '?'} ms（收据≠终局）`, 'bad', ts)
+        this.logT(source, e.type, msg('ev.vetoReceipt', { id, b: toNum(e.block) ?? '?', st: String(e.status), ms: e.latencyMs ?? '?' }), 'bad', ts)
         break
       case 'veto_finalized':
         if (s) s.finalizedBlock = toNum(e.block)
-        this.log(source, e.type, `否决已终局 #${id}：块 ${toNum(e.block) ?? '?'}`, 'bad', ts)
+        this.logT(source, e.type, msg('ev.vetoFinal', { id, b: toNum(e.block) ?? '?' }), 'bad', ts)
         break
       case 'proposal_dropped':
         p.dropped = true
-        this.log(source, e.type, `提案 #${id} 的 log 在终局前消失`, 'warn', ts)
+        this.logT(source, e.type, msg('ev.dropped', { id }), 'warn', ts)
         break
       case 'reason_attached':
         p.report.attachTx = e.txHash
         p.report.reportHash = e.reportHash
-        this.log(source, e.type, `报告哈希已上链 #${id}：${short(e.reportHash)}`, 'info', ts)
+        this.logT(source, e.type, msg('ev.reason', { id, h: short(e.reportHash) }), 'info', ts)
         break
       case 'execute_attempt': {
         p.execute = { txHash: e.txHash, result: e.result, error: e.error ?? null, extra: e.extra, ts }
         const okx = e.result === 'success'
-        this.log(source, e.type, okx ? `execute #${id} 成功 tx ${short(e.txHash)}` : `execute #${id} 回滚：${e.error ?? '?'} tx ${short(e.txHash)}`, okx ? 'good' : 'bad', ts)
+        this.logT(source, e.type, okx ? msg('ev.execOk', { id, tx: short(e.txHash) }) : msg('ev.execFail', { id, err: e.error ?? '?', tx: short(e.txHash) }), okx ? 'good' : 'bad', ts)
         break
       }
       case 'report_token':
@@ -340,12 +350,14 @@ export class Store {
         p.report.open = true
         // 用本机收到的时间算自动收起，避免各进程时钟不同步
         p.report.doneTs = Date.now()
-        this.log(source, e.type, `AI 报告完成 #${id}${e.cached ? '（模板）' : ''} hash ${short(e.hash)}`, 'info', ts)
+        this.logT(source, e.type, msg('ev.reportDone', { id, tpl: e.cached ? msg('ev.tpl') : '', h: short(e.hash) }), 'info', ts)
         break
     }
     this.emit()
   }
 }
+
+const isExtra = (type: string) => Object.prototype.hasOwnProperty.call(EXTRA_EVENT_TEXT, type)
 
 export function short(h: unknown, n = 6): string {
   const s = typeof h === 'string' ? h : ''

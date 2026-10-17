@@ -7,6 +7,7 @@
 import { decodeEventLog, decodeFunctionResult, encodeFunctionData, numberToHex, pad, toEventSelector, type Abi, type Hex } from 'viem'
 import { blocks } from './chain'
 import DATA from './chain-data.json'
+import { msg } from './i18n'
 import { CHAIN, SENTINELS } from './runtime'
 import { short, store, type Proposal } from './store'
 import type { CardId } from './types'
@@ -27,6 +28,7 @@ const TOPIC0 = Object.fromEntries(
 ) as Record<(typeof EVENTS)[number], Hex>
 const ALL_TOPICS = EVENTS.map((e) => TOPIC0[e])
 
+/** 画面上的状态文字按语言查 i18n（status.N）；这里留 zh-CN 原文给旧呼叫端 */
 export const STATUS_CN = ['不存在', '冷静期中', '已否决', '已执行'] as const
 const STATUS_NAME = ['None', 'Pending', 'Vetoed', 'Executed'] as const
 
@@ -208,7 +210,7 @@ function handleLog(l: RawLog, live: boolean) {
   if (!l?.topics?.length || l.address?.toLowerCase() !== GA.toLowerCase()) return
   const key = `${l.transactionHash}|${l.logIndex}`
   if (l.removed) {
-    store.log('chain', 'removed', `链重组：log ${short(l.transactionHash)} 被移除`, 'warn')
+    store.logT('chain', 'removed', msg('cw.removed', { tx: short(l.transactionHash) }), 'warn')
     seenLogs.delete(key)
     store.emit()
     return
@@ -240,7 +242,7 @@ function handleLog(l: RawLog, live: boolean) {
         manualPick = false
         store.activeId = id
       }
-      store.log('chain', 'Proposed', `Proposed #${id}：块 ${block}，可执行块 ${p.readyBlock}，tx ${short(tx)}`, 'info', ts)
+      store.logT('chain', 'Proposed', msg('cw.proposed', { id, b: block, rb: p.readyBlock ?? '?', tx: short(tx) }), 'info', ts)
       break
     }
     case 'Vetoed': {
@@ -256,18 +258,19 @@ function handleLog(l: RawLog, live: boolean) {
         sp.receipt = { txHash: tx, block, status: 'success', gasUsed: undefined, gasLimit: undefined, effectiveGasPrice: undefined, latencyMs: null }
         void fillReceipt(id, s, tx)
       }
-      const who = s ? `哨兵 ${s.split('-')[1]}` : `未知 guardian ${short(guardian, 4)}`
-      store.log('chain', 'Vetoed', `Vetoed #${id}：${who} 在块 ${block}${p.proposeBlock ? `（提案后 ${block - p.proposeBlock} 块）` : ''} · ${rule ?? '规则未知'} · 第 ${ev.args.vetoCount} 票`, 'bad', ts)
+      const who = s ? msg('cw.whoS', { n: s.split('-')[1] }) : msg('cw.whoUnknown', { g: short(guardian, 4) })
+      const after = p.proposeBlock ? msg('cw.after', { n: block - p.proposeBlock }) : ''
+      store.logT('chain', 'Vetoed', msg('cw.vetoed', { id, who, b: block, after, rule: rule ?? msg('cw.ruleUnknown'), n: String(ev.args.vetoCount) }), 'bad', ts)
       break
     }
     case 'Executed':
       p.execute = { txHash: tx, result: 'success', error: null, ts }
-      store.log('chain', 'Executed', `Executed #${id}：块 ${block}，tx ${short(tx)}`, 'good', ts)
+      store.logT('chain', 'Executed', msg('cw.executed', { id, b: block, tx: short(tx) }), 'good', ts)
       break
     case 'ReasonAttached':
       p.report.attachTx = tx
       p.report.reportHash = String(ev.args.reportHash)
-      store.log('chain', 'ReasonAttached', `ReasonAttached #${id}：报告哈希 ${short(String(ev.args.reportHash))}`, 'info', ts)
+      store.logT('chain', 'ReasonAttached', msg('cw.reason', { id, h: short(String(ev.args.reportHash)) }), 'info', ts)
       break
   }
   pickActive()
@@ -369,11 +372,11 @@ async function loadRecent() {
         }),
       )
       chainHealth.loadedRecent = true
-      store.log('chain', 'load', `已从链上载入最近 ${props.length} 个提案（nextId ${next}）`, 'info')
+      store.logT('chain', 'load', msg('cw.loaded', { n: props.length, next }), 'info')
       store.emit()
       return
     } catch (e) {
-      store.log('chain', 'load', `载入最近提案失败（第 ${attempt + 1} 次），稍后重试：${(e as Error).message.slice(0, 80)}`, 'warn')
+      store.logT('chain', 'load', msg('cw.loadFail', { n: attempt + 1, err: (e as Error).message.slice(0, 80) }), 'warn')
       store.emit()
       await new Promise((r) => setTimeout(r, Math.min(10000, 2000 * (attempt + 1))))
     }
