@@ -3,10 +3,11 @@
 // 不能用 import.meta.env、window 或任何浏览器 API。
 //
 // 运行期覆盖（URL 参数，方便现场切换，不必重新 build）：
-//   ?mode=testnet | replay | fake     模式（默认见 defaultMode）
+//   ?mode=testnet | replay | fake | chain   模式（默认见 defaultMode；云端版 vite build --mode cloud 默认 chain）
+//     chain：浏览器直连 Monad 测试网唯读（不连 driver/哨兵/reporter），见 chainwatch.ts
 //   ?anvil=8548                       本机重演模式连哪个 anvil 端口（默认 8545）
 
-export type AppMode = 'testnet' | 'replay' | 'fake'
+export type AppMode = 'testnet' | 'replay' | 'fake' | 'chain'
 
 export interface ChainConfig {
   chainId: number
@@ -42,6 +43,18 @@ export const CONFIG = {
       explorerTx: 'https://testnet.monadexplorer.com/tx/',
       explorerAddr: 'https://testnet.monadexplorer.com/address/',
       // Monad 测试网的 Sourcify 实例（部署脚本的 VERIFIER_URL 同一家）；浏览器端只读 GET，允许 CORS
+      sourcifyApi: 'https://sourcify-api-monad.blockvision.org/v2/contract/10143/',
+    } satisfies ChainConfig,
+    /** 云端只读版：浏览器直连测试网（两家 HTTP 端点都已确认允许 CORS） */
+    chain: {
+      chainId: 10143,
+      badge: 'Monad 测试网 · 链上只读',
+      ws: ['wss://testnet-rpc.monad.xyz'],
+      http: ['https://testnet-rpc.monad.xyz', 'https://rpc.ankr.com/monad_testnet'],
+      headsMethod: 'monadNewHeads',
+      // monadexplorer.com 会 308 转到 monadvision，这里直接用新网域
+      explorerTx: 'https://testnet.monadvision.com/tx/',
+      explorerAddr: 'https://testnet.monadvision.com/address/',
       sourcifyApi: 'https://sourcify-api-monad.blockvision.org/v2/contract/10143/',
     } satisfies ChainConfig,
     replay: {

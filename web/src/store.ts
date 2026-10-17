@@ -44,6 +44,8 @@ export interface Proposal {
   sentinels: Record<string, SentinelOnProposal>
   execute?: { txHash?: string; result?: string; error?: string | null; extra?: Record<string, unknown>; ts: number }
   report: { text: string; done: boolean; hash?: string; cached?: boolean; attachTx?: string; reportHash?: string; open: boolean; doneTs?: number }
+  /** 只有 ?mode=chain：getProposal 读到的链上状态（status 0 None／1 Pending／2 Vetoed／3 Executed） */
+  chain?: { status: number; statusName: string; vetoCount: number; proposer: string; readTs: number }
 }
 
 export interface SourceHealth {

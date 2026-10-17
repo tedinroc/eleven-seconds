@@ -8,7 +8,10 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "typecheck": "tsc",
-    "selftest": "rolldown test/selftest.ts -p node -f esm -o node_modules/.cache/eleven-selftest.mjs && node node_modules/.cache/eleven-selftest.mjs"
+    "selftest": "rolldown test/selftest.ts -p node -f esm -o node_modules/.cache/eleven-selftest.mjs && node node_modules/.cache/eleven-selftest.mjs",
+    "sync:chain": "node scripts/sync-chain-data.mjs",
+    "build:cloud": "node scripts/sync-chain-data.mjs && tsc && vite build --mode cloud",
+    "deploy:cloud": "npm run build:cloud && npx -y wrangler@3 pages deploy dist --project-name eleven-seconds --branch main --commit-dirty=true"
   },
   "dependencies": {
     "viem": "2.57.2"

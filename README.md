@@ -12,6 +12,17 @@ Built at **Monad Blitz Shanghai, 2026-10-17**. Network: Monad testnet (chain id 
 
 ---
 
+## Live demo
+
+**https://eleven-seconds.pages.dev** — the war room in read-only chain mode (`?mode=chain`). The browser
+talks to Monad testnet directly (WS `monadNewHeads` + GuardedAdmin `logs`, falling back to cursor-based
+`eth_getLogs`, ≤100 blocks per call) and shows the last 5 proposals with who vetoed in which block, blocks
+left for the attacker, the veto cost from the receipt (`gasUsed × effectiveGasPrice`) and MonadVision links.
+It does not propose anything: live proposals are triggered by the operator, and the AI report text stays on
+the operator's machine (only its on-chain `reportHash` / `attachReason` tx is shown).
+Rebuild: `cd web && npm run build:cloud` (bundles `shared/` deployment, ABI and rule hashes), then
+`npx -y wrangler@3 pages deploy dist --project-name eleven-seconds --branch main`.
+
 ## The problem
 
 Upgradeable proxies are the most dangerous button in a protocol. When the upgrade key leaks, the

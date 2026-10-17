@@ -2,7 +2,8 @@ import './style.css'
 import { blocks } from './chain'
 import { playFake, startFake, toggleFakeOffline } from './fake'
 import { checkVerified, fillProposeTx } from './lookup'
-import { MODE } from './runtime'
+import { startChainWatch, selectProposal } from './chainwatch'
+import { MODE, READ_ONLY } from './runtime'
 import { connectServices, getDriver, postDriver } from './sse'
 import { store } from './store'
 import { CARDS, type CardId } from './types'
@@ -21,7 +22,7 @@ function loop() {
     dirty = false
     if (MODE !== 'fake') {
       // 只读补查：缺提案交易哈希就查 Proposed log；合约地址查 Sourcify（测试网才有）
-      fillProposeTx()
+      if (!READ_ONLY) fillProposeTx()
       checkVerified(store.deploy?.guardedAdmin)
       const t = store.active?.target
       if (t) checkVerified(t)
@@ -36,6 +37,10 @@ setInterval(mark, 250)
 
 if (MODE === 'fake') {
   startFake()
+} else if (READ_ONLY) {
+  // 云端只读版：区块头 + GuardedAdmin log 直接读测试网；不连 driver/哨兵/reporter
+  blocks.start()
+  startChainWatch()
 } else {
   blocks.start()
   connectServices()
@@ -64,6 +69,7 @@ async function loadDeployments() {
 }
 
 async function propose(card: CardId, isJudge: boolean) {
+  if (READ_ONLY) return // 链上只读：现场提案由操作者触发
   if (isJudge) {
     judge.picked = card
     judge.status = '提案送出中…'
@@ -101,6 +107,7 @@ async function propose(card: CardId, isJudge: boolean) {
 
 /** 严格模式（R5）用：approver 预核准 v2 的 codehash */
 async function approveV2() {
+  if (READ_ONLY) return
   try {
     const r = await postDriver<{ codehash: string; txHash: string }>('/approve', { card: 'v2' })
     store.log('driver', 'approve', `approver 已核准 v2 codehash ${r.codehash.slice(0, 10)}… tx ${r.txHash.slice(0, 10)}…`, 'good')
@@ -111,7 +118,11 @@ async function approveV2() {
 }
 
 function act(a: string) {
-  if (a === 'judge') {
+  if (READ_ONLY && (a === 'judge' || a === 'approve' || a === 'kill' || a === 'reshuffle' || a.startsWith('p:'))) return
+  if (a.startsWith('sel:')) {
+    selectProposal(a.slice(4))
+    ui.reportDismissedFor = ''
+  } else if (a === 'judge') {
     ui.judgeOpen = !ui.judgeOpen
     ui.tableOpen = false
   } else if (a === 'table') {
@@ -149,7 +160,7 @@ document.addEventListener('click', (ev) => {
   const btn = t.closest<HTMLElement>('[data-act]')
   if (btn) return act(btn.dataset.act!)
   const card = t.closest<HTMLElement>('[data-card]')
-  if (card && !judge.picked) void propose(card.dataset.card as CardId, true)
+  if (card && !judge.picked && !READ_ONLY) void propose(card.dataset.card as CardId, true)
 })
 
 document.addEventListener('keydown', (ev) => {
