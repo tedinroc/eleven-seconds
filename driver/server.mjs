@@ -4,6 +4,7 @@
 //   POST /propose  {"card":"evilMint"|"evilOwner"|"evilFee"|"v2"|"v1"}   admin 送 proposeUpgrade(impl, 0x)
 //   POST /execute  {"id":"3"}      先 eth_call 拿错误名称，再用 gas.json 的固定 gas limit 真的送出
 //   POST /approve  {"card":"v2"} 或 {"codehash":"0x…"}   approver 送 approveCodehash（严格模式用）
+//   POST /demo/sentinel {"n":3,"action":"stop"|"start"}   stage helper: stop or restart one sentinel (local only)
 //   GET  /events   SSE（spec 4.4：heartbeat、execute_attempt）   GET /health   GET /deployments
 //
 // 环境变数：
@@ -19,6 +20,10 @@
 //   AUTO_EXECUTE=0              关掉冷静期满自动 execute
 //   PORT=8700
 import http from 'node:http'
+import { execFileSync, spawn } from 'node:child_process'
+import { openSync, mkdirSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
 import { encodeFunctionData, decodeEventLog, keccak256 } from 'viem'
 import {
   decodeRevert,
@@ -486,6 +491,39 @@ const readBody = (req) =>
     req.on('error', reject)
   })
 
+// Stage helper: stop / restart one sentinel so the audience can see the other two still veto.
+// Local only (the driver listens on 127.0.0.1). stop = SIGTERM to the node process listening on 870<n>.
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+function sentinelPid(n) {
+  try {
+    const out = execFileSync('lsof', ['-nP', '-t', `-iTCP:${8700 + n}`, '-sTCP:LISTEN'], { encoding: 'utf8' }).trim()
+    const pid = Number(out.split('\n')[0])
+    if (!pid) return null
+    const comm = execFileSync('ps', ['-o', 'comm=', '-p', String(pid)], { encoding: 'utf8' }).trim()
+    return /node/.test(comm) ? pid : null
+  } catch { return null }
+}
+function sentinelControl(n, action) {
+  if (![1, 2, 3].includes(n)) throw Object.assign(new Error('n must be 1, 2 or 3'), { code: 400 })
+  const pid = sentinelPid(n)
+  if (action === 'stop') {
+    if (!pid) return { ok: true, n, already: 'stopped' }
+    process.kill(pid, 'SIGTERM')
+    return { ok: true, n, stopped: pid }
+  }
+  if (action === 'start') {
+    if (pid) return { ok: true, n, already: 'running', pid }
+    mkdirSync(path.join(REPO_ROOT, '.demo'), { recursive: true })
+    const log = openSync(path.join(REPO_ROOT, '.demo', `sentinel-${n}.log`), 'a')
+    const child = spawn('sh', ['sentinel/run.sh', MODE === 'testnet' ? 'testnet' : 'anvil'], {
+      cwd: REPO_ROOT, env: { ...process.env, ONLY: String(n) }, detached: true, stdio: ['ignore', log, log],
+    })
+    child.unref()
+    return { ok: true, n, starting: child.pid }
+  }
+  throw Object.assign(new Error('action must be stop or start'), { code: 400 })
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost')
   if (req.method === 'OPTIONS') {
@@ -566,6 +604,10 @@ const server = http.createServer(async (req, res) => {
       } finally {
         execBusy.delete(sid)
       }
+    }
+    if (req.method === 'POST' && url.pathname === '/demo/sentinel') {
+      const b = await readBody(req)
+      return json(res, 200, sentinelControl(Number(b.n), String(b.action ?? '')))
     }
     if (req.method === 'POST' && url.pathname === '/approve') {
       return json(res, 200, await approveFlow(await readBody(req)))

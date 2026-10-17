@@ -150,6 +150,8 @@ function act(a: string) {
     judge.pickedId = null
     judge.status = ''
   } else if (a === 'kill' && MODE === 'fake') toggleFakeOffline('sentinel-3')
+  else if ((a === 'kill' || a === 'revive') && MODE !== 'fake' && !READ_ONLY)
+    void postDriver('/demo/sentinel', { n: 3, action: a === 'kill' ? 'stop' : 'start' }).catch((e) => console.warn('sentinel control', e))
   else if (a.startsWith('p:')) void propose(a.slice(2) as CardId, false)
   else if (a === 'approve' && MODE !== 'fake') void approveV2()
   mark()
@@ -169,7 +171,7 @@ document.addEventListener('keydown', (ev) => {
   if (k === 'j') act('judge')
   else if (k === 't') act('table')
   else if (k === 'r') act('report')
-  else if (k === 'k') act('kill')
+  else if (k === 'k') act(ev.shiftKey ? 'revive' : 'kill')
   else if (k === 'a') act('approve')
   else if (k === 'escape') {
     ui.judgeOpen = false
