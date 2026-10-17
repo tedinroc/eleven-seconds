@@ -67,6 +67,18 @@ function simFor(rule, id = 7) {
     extra.skimmedTo = [{ address: OWNER, delta: (X / 10n).toString() }];
   }
   if (rule === 'R4_TRANSFER_LIVENESS') checks[3] = bad('R4_TRANSFER_LIVENESS', 'transfer', 'reverted');
+  if (rule === 'R3B_THIRD_PARTY_FUNDS') {
+    // sentinel/src/simulate.mjs shape: check strings + extra.thirdPartyDeltas
+    checks.push(bad('R3B_THIRD_PARTY_FUNDS', 'transferFrom(holder, stranger) without allowance', 'succeeded'));
+    extra.thirdPartyDeltas = [
+      { address: '0x' + 'b2'.repeat(20), delta: (-X).toString() },
+      { address: '0x' + 'c3'.repeat(20), delta: X.toString() },
+    ];
+    extra.culprits = [{ selector: toFunctionSelector('transferFrom(address,address,uint256)'), args: [], effects: ['moved-others-funds'] }];
+  }
+  if (rule === 'R9_NEW_OPCODES') {
+    checks.push(bad('R9_NEW_OPCODES', ['CALL', 'STATICCALL'], ['CALL', 'NUMBER', 'STATICCALL', 'TIMESTAMP']));
+  }
   if (rule === 'R6_SIM_FAILURE') extra.error = 'both simulate RPCs timed out (2500 ms each)';
   if (rule === 'R7_CONFIG_GUARD') checks.splice(0, 4, bad('R7_CONFIG_GUARD', 'guardian enabled', 'remove (not approved)'));
   if (rule === 'pass') selectorsAdded = [toFunctionSelector('version()')];
@@ -95,8 +107,9 @@ function seenFor(id, kind = 0, target = IMPL, proposeBlock = 1000) {
 }
 
 // ---- fake sentinels: SSE + /attach ---------------------------------------------------
-async function fakeSentinels(n = 3, { attach = true } = {}) {
+async function fakeSentinels(n = 3, { attach = true, secret = null } = {}) {
   const attached = [];
+  const attachHeaders = [];
   const servers = [];
   for (let i = 1; i <= n; i++) {
     const clients = new Set();
@@ -109,6 +122,12 @@ async function fakeSentinels(n = 3, { attach = true } = {}) {
         return;
       }
       if (req.method === 'POST' && req.url === '/attach' && i === 1 && attach) {
+        attachHeaders.push({ contentType: req.headers['content-type'] ?? null, secret: req.headers['x-attach-secret'] ?? null });
+        if (secret !== null && req.headers['x-attach-secret'] !== secret) {
+          res.writeHead(401, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: 'bad attach secret' }));
+          return;
+        }
         let b = '';
         req.on('data', (c) => (b += c));
         req.on('end', () => {
@@ -134,6 +153,7 @@ async function fakeSentinels(n = 3, { attach = true } = {}) {
   return {
     servers,
     attached,
+    attachHeaders,
     emit,
     emitAll: (ev) => servers.forEach((_, k) => emit(k, ev)),
     waitClients,
@@ -243,7 +263,37 @@ await test('templates: every rule renders clean Simplified Chinese', () => {
     if (rule === 'R3_TRANSFER_CONSERVATION') assert.match(t, /实际到账 0\.9 dBTC/);
     if (rule === 'R3_TRANSFER_CONSERVATION') assert.match(t, /-10\.00%/);
     if (rule === 'pass') assert.match(t, /放行/);
+    if (rule === 'R3B_THIRD_PARTY_FUNDS') {
+      assert.match(t, /transferFrom/);
+      assert.match(t, /-1 dBTC/);
+      assert.doesNotMatch(t, /转账前后不守恒/); // must not fall back to the R3 template
+    }
+    if (rule === 'R9_NEW_OPCODES') assert.match(t, /多了 2 个危险操作码（NUMBER、TIMESTAMP）/);
+    if (rule === 'R9_SOMETHING_NEW') assert.match(t, /依据规则 R9_SOMETHING_NEW/);
   }
+});
+
+await test('rules: R3B / R9 normalize to themselves, never to R3 or another rule', async () => {
+  const { normalizeRuleId } = await import('../src/rules.mjs');
+  assert.equal(normalizeRuleId('GUARD/R3B_THIRD_PARTY_FUNDS'), 'R3B_THIRD_PARTY_FUNDS');
+  assert.equal(normalizeRuleId('R3B'), 'R3B_THIRD_PARTY_FUNDS');
+  assert.equal(normalizeRuleId('R3'), 'R3_TRANSFER_CONSERVATION');
+  assert.equal(normalizeRuleId('GUARD/R9_NEW_OPCODES'), 'R9_NEW_OPCODES');
+  assert.equal(normalizeRuleId('R9_SOMETHING_NEW'), null);
+  assert.equal(buildFacts(simFor('R3B_THIRD_PARTY_FUNDS'), seenFor(7)).ruleId, 'R3B_THIRD_PARTY_FUNDS');
+});
+
+await test('facts: R9 opcodes from extra (no R9 check) are counted by code, not by hand', () => {
+  const sim = simFor('R9_NEW_OPCODES');
+  sim.checks = sim.checks.filter((c) => c.name !== 'R9_NEW_OPCODES');
+  sim.extra.newOpcodes = ['SELFDESTRUCT', 'ORIGIN', 'TIMESTAMP'];
+  const f = buildFacts(sim, seenFor(7), { decimals: 8, symbol: 'dBTC' });
+  assert.deepEqual(f.opcodesAdded, ['ORIGIN', 'SELFDESTRUCT', 'TIMESTAMP']);
+  assert.match(templateReport(f), /多了 3 个危险操作码（ORIGIN、SELFDESTRUCT、TIMESTAMP）/);
+  assert.ok(f.lines.some((l) => /新增的危险操作码（共 3 个）/.test(l)));
+  const f2 = buildFacts(simFor('R3B_THIRD_PARTY_FUNDS'), seenFor(7), { decimals: 8, symbol: 'dBTC' });
+  assert.equal(f2.thirdPartyCount, 2);
+  assert.ok(f2.lines.some((l) => /余额被改动的地址（共 2 个）/.test(l)));
 });
 
 await test('rules: shared/rules.json (if present) agrees with keccak256("GUARD/<id>")', () => {
@@ -287,6 +337,7 @@ await test('e2e template path: 3 sentinels -> one report, hash on disk, attach v
       assert.ok(toks.every((e) => e.cached === true));
       assert.deepEqual(s.attached, [{ id: 7, reportHash: rec.hash }]);
       assert.equal(rec.attach.ok, true);
+      assert.deepEqual(s.attachHeaders, [{ contentType: 'application/json', secret: null }], 'no ATTACH_SECRET -> no header');
       // replays and duplicates from any sentinel must not produce a second report
       s.emitAll(simFor('R3_TRANSFER_CONSERVATION'));
       await sleep(400);
@@ -433,6 +484,25 @@ await test('e2e model says something banned -> template', async () => {
   } finally {
     s.close();
     lm.close();
+  }
+});
+
+await test('e2e attach secret: ATTACH_SECRET is sent as x-attach-secret with application/json', async () => {
+  const s = await fakeSentinels(1, { secret: 'demo-attach-secret' });
+  try {
+    await withReporter({ sentinels: s.urls, attachUrl: s.attachUrl, env: { ATTACH_SECRET: 'demo-attach-secret' } }, async ({ r }) => {
+      await s.waitClients();
+      const wait = r.waitForReport((x) => x.id === '9', 5000);
+      s.emitAll(seenFor(9));
+      s.emitAll(simFor('R9_NEW_OPCODES', 9));
+      const rec = await wait;
+      assert.equal(rec.rule, 'R9_NEW_OPCODES');
+      assert.equal(rec.attach.ok, true);
+      assert.deepEqual(s.attachHeaders, [{ contentType: 'application/json', secret: 'demo-attach-secret' }]);
+      assert.deepEqual(s.attached, [{ id: 9, reportHash: rec.hash }]);
+    });
+  } finally {
+    s.close();
   }
 });
 

@@ -17,6 +17,8 @@ import {EvilFeeImpl} from "../src/attack/EvilFeeImpl.sol";
 /// @notice One-shot deployment of the whole demo (spec 3.6):
 ///   deployer: DemoBTC v1 impl -> TransparentUpgradeableProxy(initialOwner = admin) -> other impls -> GuardedAdmin
 ///   admin:    ProxyAdmin.transferOwnership(GuardedAdmin)   (the "adoption" step)
+///             DemoBTC(proxy).transferOwnership(GuardedAdmin) (same step: the token's own owner-only
+///             functions, e.g. mint, must not stay with the key that proposes upgrades)
 /// Run it through script/deploy.sh, which picks the signers and the output file.
 ///
 /// Signers / roles:
@@ -74,12 +76,17 @@ contract Deploy is Script {
             address(new GuardedAdmin(o.proxyAdmin, o.proxy, c.admin, c.guardians, c.approver, o.paused, c.delay));
         vm.stopBroadcast();
 
-        // Adoption: the (current) ProxyAdmin owner hands it to GuardedAdmin, once.
+        // Adoption: the (current) ProxyAdmin owner hands it to GuardedAdmin, once. In the same step the
+        // token owner (also admin) hands the token's Ownable to GuardedAdmin, so a leaked admin key can
+        // only *propose* (and wait, and be vetoed); it cannot mint directly. GuardedAdmin has no
+        // generic call path, so the token's owner-only functions become unreachable by design.
         vm.startBroadcast(c.adminPk);
         ProxyAdmin(o.proxyAdmin).transferOwnership(o.guardedAdmin);
+        DemoBTC(o.proxy).transferOwnership(o.guardedAdmin);
         vm.stopBroadcast();
 
         require(GuardedAdmin(o.guardedAdmin).isWired(), "not wired");
+        require(DemoBTC(o.proxy).owner() == o.guardedAdmin, "token owner not GuardedAdmin");
         require(address(uint160(uint256(vm.load(o.proxy, ERC1967Utils.IMPLEMENTATION_SLOT)))) == o.v1, "impl mismatch");
 
         _write(c, o, startBlock);
@@ -175,6 +182,8 @@ contract Deploy is Script {
         vm.serializeString(root, "token", tokenJson);
         vm.serializeAddress(root, "deployer", c.deployer);
         vm.serializeAddress(root, "owner", c.admin);
+        // Ownable owner of the token itself (DemoBTC proxy) after adoption.
+        vm.serializeAddress(root, "tokenOwner", DemoBTC(o.proxy).owner());
         vm.serializeAddress(root, "guardians", c.guardians);
         vm.serializeAddress(root, "approver", c.approver);
         vm.serializeAddress(root, "holders", c.holders);

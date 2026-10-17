@@ -1,7 +1,7 @@
 // 前端状态：合并 3 个哨兵、driver、reporter 的事件，按 proposal id 去重。
 import { CONFIG } from './config'
 import { MODE, SENTINELS } from './runtime'
-import { normRule, toNum, type CardId, type Check, type WarEvent } from './types'
+import { EXTRA_EVENT_TEXT, isKnownEventType, normRule, toNum, type CardId, type Check, type WarEvent } from './types'
 
 export interface SentinelOnProposal {
   seenTs?: number
@@ -127,6 +127,21 @@ export class Store {
     }
   }
 
+  /** 未知或新增的事件类型：照实列进事件串流（截短），不改任何提案状态，也不会让页面出错。 */
+  private logUnknown(source: string, e: WarEvent, id: string | null, ts: number) {
+    const type = String(e.type).slice(0, 40)
+    const label = EXTRA_EVENT_TEXT[type] ?? `未知事件 ${type}`
+    const parts: string[] = []
+    if (id) parts.push(`#${id}`)
+    const rule = normRule(typeof e.rule === 'string' ? e.rule : null)
+    if (rule) parts.push(rule)
+    if (typeof e.txHash === 'string') parts.push(`tx ${short(e.txHash)}`)
+    const msg = typeof e.error === 'string' ? e.error : typeof e.text === 'string' ? e.text : ''
+    if (msg) parts.push(msg.length > 120 ? msg.slice(0, 120) + '…' : msg)
+    const failed = /fail|error|revert/i.test(type) || e.ok === false
+    this.log(source, type, `${label}${parts.length ? '：' + parts.join(' ') : ''}`, failed ? 'warn' : 'info', ts)
+  }
+
   log(source: string, type: string, text: string, level: StreamLine['level'] = 'info', ts = Date.now()) {
     this.stream.push({ ts, source, type, text, level })
     if (this.stream.length > 80) this.stream.shift()
@@ -206,10 +221,16 @@ export class Store {
     if (ts < this.loadTs - 1500) return
 
     const id = e.id !== undefined && e.id !== null ? String(e.id) : null
-    const key = `${source}|${e.type}|${id}|${e.txHash ?? ''}|${e.type === 'report_token' ? ts + (e.delta ?? '') : ''}`
+    const key = `${source}|${e.type}|${id}|${e.txHash ?? ''}|${e.type === 'report_token' || !isKnownEventType(e.type) ? ts + (e.delta ?? '') : ''}`
     if (this.dedup.has(key)) return
     this.dedup.add(key)
     if (this.dedup.size > 5000) this.dedup.clear()
+
+    if (!isKnownEventType(e.type)) {
+      this.logUnknown(source, e, id, ts)
+      this.emit()
+      return
+    }
 
     if (!id) return
 

@@ -47,6 +47,7 @@ npm run probe-llm      # 對真的 LM Studio 打一次，看首字延遲、tok/s
 | `REPORTER_PORT` | 8710 |
 | `SENTINEL_EVENTS` | `http://127.0.0.1:870{1,2,3}/events?backlog=50`（逗號分隔） |
 | `ATTACH_URL` | `http://127.0.0.1:8701/attach` |
+| `ATTACH_SECRET` | 未設（設了就以 `x-attach-secret` 標頭送給 POST /attach，未設不帶） |
 | `LLM_URL` / `LLM_MODEL` / `LLM_API` | `http://localhost:1234` / 自動 / `completions` |
 | `LLM_TIMEOUT_MS` / `LLM_FIRST_TOKEN_MS` / `LLM_MAX_TOKENS` | 20000 / 12000 / 80 |
 | `LLM_DISABLE=1` | 一律用模板 |

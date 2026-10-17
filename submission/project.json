@@ -1,6 +1,6 @@
 {
   "name": "十一秒 Eleven Seconds",
-  "description": "十一秒：给合约的每次升级装上 30 个区块的冷静期，并利用这段窗口在模拟器里先把新合约当攻击者打一遍。GuardedAdmin 接管现有的 OpenZeppelin ProxyAdmin（转一次 owner 即可，原 proxy 不必重新部署）；3 个独立哨兵监听提案，用 eth_simulateV1＋stateOverride 把新实现换进 proxy，用陌生地址调用新字节码的每个函数，检查 totalSupply 不变、owner 不变、转账守恒、正常转账必须成功，违反即链上否决，模拟失败一律否决。本地 AI 或模板把模拟差异写成中文风险说明，哈希用 attachReason 上链给多签参考，不参与否决。Demo：用“泄露的私钥”提交恶意铸币升级，3/3 哨兵否决，攻击者 execute 回 ProposalVetoed；正常升级 v2 在 30 块后生效。Monad 测试网 GuardedAdmin：0x57a84DCaDB3C29aeF27Cd5d7f3A3Af2C27F25ef4（Sourcify 已验证）。今日测试网实测：提案后第 9 块否决就落地，攻击者还要等 21 块；看到提案到否决回执 2.68 秒；单次否决约 0.0126 MON；出块约 0.30 秒/块。赛前只准备了 Foundry/OZ/viem/Vite 样板与纯文字规格，应用逻辑全部在活动当天完成。",
+  "description": "十一秒：给合约的每次升级装上 30 个区块的冷静期，并利用这段窗口在模拟器里先把新合约当攻击者打一遍。GuardedAdmin 接管现有的 OpenZeppelin ProxyAdmin（转一次 owner 即可，原 proxy 不必重新部署）；3 个独立哨兵监听提案，用 eth_simulateV1＋stateOverride 把新实现换进 proxy，用陌生地址调用新字节码的每个函数，检查 totalSupply 不变、owner 不变、转账守恒、正常转账必须成功，违反即链上否决，模拟失败一律否决。本地 AI 或模板把模拟差异写成中文风险说明，哈希用 attachReason 上链给多签参考，不参与否决。Demo：用“泄露的私钥”提交恶意铸币升级，3/3 哨兵否决，攻击者 execute 回 ProposalVetoed；正常升级 v2 在 30 块后生效。Monad 测试网 GuardedAdmin：0x57a84DCaDB3C29aeF27Cd5d7f3A3Af2C27F25ef4（Sourcify 已验证）。今日测试网实测：恶意升级提案后 4–7 块否决落地，攻击者还要等 23–26 块；看到提案到否决回执最快 1.25 秒；单次否决约 0.0135 MON；出块约 0.30 秒/块。赛前只准备了 Foundry/OZ/viem/Vite 样板与纯文字规格，应用逻辑全部在活动当天完成。",
   "url": "https://testnet.monadexplorer.com/address/0x57a84DCaDB3C29aeF27Cd5d7f3A3Af2C27F25ef4",
   "github": "https://github.com/tedinroc/eleven-seconds"
 }

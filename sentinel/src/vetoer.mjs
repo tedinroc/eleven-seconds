@@ -1,20 +1,24 @@
 // Veto / attachReason sender (spec 4.3 steps 3-4).
-//  - nonce kept locally: synced at start and only re-synced after a nonce error
+//  - nonce kept locally: synced (pending count) at start and re-synced after a nonce error / before
+//    every veto retry round
 //  - gas limit from shared/gas.json (never estimateGas), chainId fixed from the deployments file
 //  - fee refreshed in the background every FEE_REFRESH_MS
 //  - veto(nextId, ruleHash) pre-signed for every rule while idle
 //  - the same raw tx broadcast to every RPC at once: the first with eth_sendRawTransactionSync,
-//    the rest with eth_sendRawTransaction; "already known" / "nonce too low" count as delivered.
+//    the rest with eth_sendRawTransaction; "already known" counts as delivered. "replacement
+//    transaction underpriced" is NOT delivered (another tx holds our nonce): it is a nonce error.
+//  - no receipt after replaceAfterMs: compare the chain nonce; still unmined -> re-sign the same
+//    nonce with a 25% higher fee and broadcast again (at most 3 replacements).
 import { encodeFunctionData, keccak256 } from 'viem'
 import { RpcError, isRetryable } from './rpc.mjs'
 import { sleep } from './util.mjs'
 
-const BENIGN = /already known|known transaction|nonce too low|already imported|replacement transaction underpriced|transaction already exists/i
-const NONCE_ERR = /nonce too (low|high)|invalid nonce|nonce.*(mismatch|gap)/i
+const BENIGN = /already known|known transaction|nonce too low|already imported|transaction already exists/i
+const NONCE_ERR = /nonce too (low|high)|invalid nonce|nonce.*(mismatch|gap)|replacement transaction underpriced/i
 
 export class Vetoer {
-  constructor({ account, chainId, guardedAdmin, abi, gasLimits, mainRpc, broadcastRpcs, rules, log, feeRefreshMs = 10_000, dryRun = false, receiptTimeoutMs = 30_000 }) {
-    Object.assign(this, { account, chainId, guardedAdmin, abi, gasLimits, mainRpc, broadcastRpcs, rules, log, feeRefreshMs, dryRun, receiptTimeoutMs })
+  constructor({ account, chainId, guardedAdmin, abi, gasLimits, mainRpc, broadcastRpcs, rules, log, feeRefreshMs = 10_000, dryRun = false, receiptTimeoutMs = 30_000, replaceAfterMs = 4_000, maxReplacements = 3 }) {
+    Object.assign(this, { account, chainId, guardedAdmin, abi, gasLimits, mainRpc, broadcastRpcs, rules, log, feeRefreshMs, dryRun, receiptTimeoutMs, replaceAfterMs, maxReplacements })
     this.nonce = null
     this.fee = null
     this.feeVersion = 0
@@ -24,7 +28,8 @@ export class Vetoer {
   }
 
   async init() {
-    this.nonce = Number(await this.mainRpc.call('eth_getTransactionCount', [this.account.address, 'latest']))
+    // 'pending': a veto still in the pool from before a restart keeps its nonce (no same-nonce clash)
+    this.nonce = Number(await this.mainRpc.call('eth_getTransactionCount', [this.account.address, 'pending']))
     await this.refreshFee()
     clearInterval(this.feeTimer)
     this.feeTimer = setInterval(() => this.refreshFee().then(() => this.presign(this.nextId)).catch((e) => this.log.warn(`fee refresh: ${e.message}`)), this.feeRefreshMs)
@@ -60,7 +65,7 @@ export class Vetoer {
     return run
   }
 
-  async sign(functionName, args, nonce) {
+  async sign(functionName, args, nonce, fee = this.fee) {
     const data = encodeFunctionData({ abi: this.abi, functionName, args })
     const gas = this.gasLimits[functionName]
     const raw = await this.account.signTransaction({
@@ -70,11 +75,11 @@ export class Vetoer {
       to: this.guardedAdmin,
       data,
       gas,
-      maxFeePerGas: this.fee.maxFeePerGas,
-      maxPriorityFeePerGas: this.fee.maxPriorityFeePerGas,
+      maxFeePerGas: fee.maxFeePerGas,
+      maxPriorityFeePerGas: fee.maxPriorityFeePerGas,
       value: 0n,
     })
-    return { raw, hash: keccak256(raw), gas }
+    return { raw, hash: keccak256(raw), gas, nonce, fee }
   }
 
   // Pre-sign veto(nextId, ruleHash) for every rule at the current nonce and fee.
@@ -102,7 +107,6 @@ export class Vetoer {
         tx = await this.sign(functionName, args, this.nonce)
       }
       if (this.dryRun) return { txHash: tx.hash, rpcs: [], dryRun: true, receipt: Promise.resolve(null) }
-      onBroadcast?.({ txHash: tx.hash, rpcs: this.broadcastRpcs.map((r) => r.label) })
       let out = await this.broadcast(tx.raw)
       if (!out.delivered && out.transportOnly) {
         // Every RPC failed on the transport (tls eof, reset, 429...): resend the same raw tx once
@@ -116,15 +120,18 @@ export class Vetoer {
         out = await this.broadcast(tx.raw)
       }
       if (!out.delivered) throw new Error(`broadcast failed on all RPCs: ${out.errors.join(' | ')}`)
+      // veto_sent: only now, after the first RPC accepted the raw tx
+      onBroadcast?.({ txHash: tx.hash, rpcs: out.rpcs, acceptedBy: out.acceptedBy })
       this.nonce++
       this.presignedKey = null
       setTimeout(() => this.presign(this.nextId).catch(() => {}), 0)
-      return { txHash: tx.hash, rpcs: out.rpcs, gasLimit: tx.gas, receipt: this.waitReceipt(tx.hash, out.syncReceipt) }
+      const ctx = { functionName, args, nonce: tx.nonce, fee: tx.fee }
+      return { txHash: tx.hash, rpcs: out.rpcs, acceptedBy: out.acceptedBy, gasLimit: tx.gas, receipt: this.waitReceipt(tx.hash, out.syncReceipt, ctx) }
     })
   }
 
   async resyncNonce() {
-    this.nonce = Number(await this.mainRpc.call('eth_getTransactionCount', [this.account.address, 'latest']))
+    this.nonce = Number(await this.mainRpc.call('eth_getTransactionCount', [this.account.address, 'pending']))
     this.presignedKey = null
     this.log.warn(`nonce resynced to ${this.nonce}`)
   }
@@ -149,17 +156,22 @@ export class Vetoer {
     // Resolve as soon as any RPC accepts the tx; collect all outcomes for the event.
     const settled = []
     let syncReceipt = null
+    let acceptedBy = null
     const delivered = await new Promise((resolve) => {
       let pending = attempts.length
       attempts.forEach((p, k) =>
         p.then((r) => {
           settled[k] = { ok: true, label: r.rpc }
+          acceptedBy ??= r.rpc
           if (r.receipt) syncReceipt = r.receipt
           resolve(true)
         }).catch((e) => {
           const benign = BENIGN.test(e.message) && !/nonce too low/i.test(e.message) ? true : false
           settled[k] = { ok: benign, label: rpcs[k].label, error: e.message, nonce: NONCE_ERR.test(e.message), transport: isRetryable(e) }
-          if (benign) resolve(true)
+          if (benign) {
+            acceptedBy ??= rpcs[k].label
+            resolve(true)
+          }
         }).finally(() => {
           if (--pending === 0) resolve(settled.some((s) => s?.ok))
         }),
@@ -169,23 +181,49 @@ export class Vetoer {
     // "nonce too low" on every RPC means our local nonce is stale (or another RPC already has it).
     const nonceError = !delivered && settled.filter(Boolean).every((s) => s.nonce)
     const transportOnly = !delivered && settled.filter(Boolean).length > 0 && settled.filter(Boolean).every((s) => s.transport && !s.nonce)
-    return { delivered, nonceError, transportOnly, errors, rpcs: rpcs.map((r) => r.label), syncReceipt: () => syncReceipt }
+    return { delivered, nonceError, transportOnly, errors, rpcs: rpcs.map((r) => r.label), acceptedBy, syncReceipt: () => syncReceipt }
   }
 
-  async waitReceipt(hash, syncReceipt) {
+  // Poll for the receipt of `hash` (or of any replacement of it). Every replaceAfterMs without one,
+  // compare the chain nonce: still unmined -> re-sign the same nonce with a higher fee and broadcast
+  // it again; the nonce already used by something else -> keep looking a little, then fail.
+  async waitReceipt(hash, syncReceipt, ctx = null) {
     const t0 = Date.now()
+    const hashes = [hash.toLowerCase()]
+    let lastCheck = Date.now()
+    let replacements = 0
+    let fee = ctx?.fee
     while (Date.now() - t0 < this.receiptTimeoutMs) {
       const s = syncReceipt?.()
-      if (s && s.transactionHash?.toLowerCase() === hash.toLowerCase()) return s
-      try {
-        const r = await this.mainRpc.call('eth_getTransactionReceipt', [hash])
-        if (r) return r
-      } catch (e) {
-        this.log.warn(`receipt poll: ${e.message}`)
+      if (s && hashes.includes(s.transactionHash?.toLowerCase())) return s
+      for (const h of hashes) {
+        try {
+          const r = await this.mainRpc.call('eth_getTransactionReceipt', [h])
+          if (r) return r
+        } catch (e) {
+          this.log.warn(`receipt poll: ${e.message}`)
+        }
+      }
+      if (ctx && Date.now() - lastCheck >= this.replaceAfterMs && replacements < this.maxReplacements) {
+        lastCheck = Date.now()
+        try {
+          const mined = Number(await this.mainRpc.call('eth_getTransactionCount', [this.account.address, 'latest']))
+          if (mined <= ctx.nonce) {
+            fee = { maxFeePerGas: (fee.maxFeePerGas * 125n) / 100n + 1n, maxPriorityFeePerGas: (fee.maxPriorityFeePerGas * 125n) / 100n + 1n }
+            const tx = await this.sign(ctx.functionName, ctx.args, ctx.nonce, fee)
+            replacements++
+            hashes.push(tx.hash.toLowerCase())
+            this.log.warn(`no receipt for ${hash} after ${Date.now() - t0} ms (chain nonce ${mined} <= ${ctx.nonce}): re-sent nonce ${ctx.nonce} at +25% fee as ${tx.hash}`)
+            const out = await this.broadcast(tx.raw)
+            if (!out.delivered) this.log.warn(`replacement broadcast: ${out.errors.join(' | ').slice(0, 200)}`)
+          }
+        } catch (e) {
+          this.log.warn(`replacement check: ${e.message.slice(0, 160)}`)
+        }
       }
       await sleep(120)
     }
-    throw new Error(`no receipt for ${hash} after ${this.receiptTimeoutMs} ms`)
+    throw new Error(`no receipt for ${hashes.join(',')} after ${this.receiptTimeoutMs} ms`)
   }
 }
 

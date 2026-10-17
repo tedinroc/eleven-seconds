@@ -63,9 +63,22 @@ node sentinel/test/sim-latency.mjs                      # read-only eth_simulate
 | `FEE_REFRESH_MS` | 10000 | |
 | `GAS_HEADROOM` | 1.25 | multiplier on gas.json limits (see "Findings") |
 | `STRICT`, `DRY_RUN`, `ATTACH` | 0, 0, 1 on sentinel-1 only | |
+| `ATTACH_SECRET` | — | shared secret for `POST /attach` (header `X-Attach-Secret`); unset = loopback peers only |
+| `RESCAN_BLOCKS` | 10 | every poll round re-scans the last N blocks (dedupe by id absorbs repeats) |
+| `BACKFILL_MAX` | 200 | at start, `getProposal` on the last N ids: Pending with readyBlock > latest are judged |
+| `VETO_RETRY_MS` | 200 | first backoff of a failed veto broadcast (doubles to 2 s, jittered), retried while lastBlock < readyBlock |
+| `VETO_REPLACE_AFTER_MS` | 4000 | no receipt that long and the chain nonce did not move: re-send the same nonce at +25% fee (max 3) |
 
 Ports: SSE `127.0.0.1:870{1,2,3}` with `GET /events` (`?backlog=N` replays the last N events,
 default 0), `GET /health`, and `POST /attach {"id":N,"reportHash":"0x.."}` on sentinel-1 only.
+
+`POST /attach` spends the guardian's nonce and gas, so it is not a CORS endpoint: no
+`Access-Control-Allow-Origin` (also not on its preflight), `content-type: application/json` required
+(415 otherwise; a cross-site "simple request" cannot carry it), and with `ATTACH_SECRET` set the
+request must carry `X-Attach-Secret: <secret>` (401 otherwise); without a secret only peers on
+127.0.0.1 / ::1 are accepted. Before signing, `getProposal(id)` (eth_call) must show a known
+proposal (status != None), else 400 `unknown proposal`. `/events` and `/health` keep `ACAO: *` for
+the frontend.
 
 ## RPC transport (why simMs dropped)
 
@@ -105,17 +118,58 @@ default 0), `GET /health`, and `POST /attach {"id":N,"reportHash":"0x.."}` on se
 
 ## Judging
 
-- Upgrade (kind 0): R5 (STRICT and codehash not approved) and R8 (non-empty data and codehash not
-  approved) are decided without simulating. Otherwise one merged `eth_simulateV1` request, one block:
-  baseline reads → `holders[0]` transfers 1% of its balance to a fresh address → reads → every selector
-  found in the new bytecode × 4 argument sets (none / stranger / stranger+2^128 / 2^128) from a fresh
-  stranger → reads. 73 calls for the demo impls. The request never contains a `validation` field.
-- When several invariants break, the reported rule is the first of R4, R3, R2, R1 (so EvilOwner,
+- Upgrade (kind 0): R5 (STRICT and codehash not approved) and R8 (non-empty data and the
+  codehash+data key not approved) are decided without simulating. Otherwise one merged
+  `eth_simulateV1` request, one block: baseline reads → a funded holder transfers 1% of its balance
+  to a fresh address → reads → stranger `transferFrom(holder, stranger, X)` (R3B) → every selector
+  found in the new bytecode × 5 argument sets + 2 fallback probes from a fresh stranger → reads
+  (totalSupply, owner, every watched balance). About 100 calls for the demo impls (15 selectors).
+  The request never contains a `validation` field.
+- When several invariants break, the reported rule is the first of R4, R3, R2, R1, R3B (so EvilOwner,
   whose `claimOwner` also unlocks `mint`, reports R2).
-- Config proposals (kinds 1-3) are R7 when they weaken the guard: removing a guardian, lowering the
-  delay, any SetPausedImpl. Approval key: the proposal's `codehash` if non-zero (SetPausedImpl), else
-  `keccak256(abi.encode(uint8 kind, address target, uint256 value))`, looked up with
-  `isApprovedCodehash`. This is a sentinel-side convention; the contract interface is unchanged.
+- Probes (per selector, from a fresh stranger): none / stranger / stranger+2^128 / 2^128 / a wide
+  set of 8 words `(stranger, 2^128, 2^128, stranger, 0, 0, 0, 0)` so 3+ argument backdoors decode,
+  plus two fallback probes (empty calldata, random unknown selector + 3 words). Selector extraction
+  accepts PUSH1-PUSH4 (left-padded to 4 bytes; solc emits PUSH3 for `0x00dca85e`); the short pushes
+  must sit in the dispatcher shape `DUPn PUSHk sel [DUPn] EQ|GT|LT PUSHm dest JUMPI`.
+- If the probes do not all fit in `SIM_MAX_CALLS` (truncated), the verdict is **R6** (fail-closed);
+  the request is not split.
+- R4/R3 use the first holder with balance > 0 (all holders' balances refreshed every 5 s); if every
+  holder is at 0, R6.
+- **R3B_THIRD_PARTY_FUNDS**: after the holder transfer the stranger calls
+  `transferFrom(holder, stranger, X)` with no allowance; it must revert (or return false). After the
+  probes every watched balance (deployments `owner`, `tokenOwner`, holders, receiver) is re-read and
+  must equal its value before the stranger calls. Priority R4, R3, R2, R1, R3B.
+- **R9_NEW_OPCODES** (static, only after a passing simulation): the new code contains one of ORIGIN,
+  BLOCKHASH, COINBASE, TIMESTAMP, NUMBER, PREVRANDAO, GAS, CALL, CALLCODE, DELEGATECALL, STATICCALL,
+  CREATE, CREATE2, SELFDESTRUCT that the current implementation (ERC-1967 slot) does not have, and
+  the codehash is not approved. The walker skips PUSH data and the CBOR metadata tail. v1, v2,
+  EvilMint, EvilOwner, EvilFee and PausedImpl contain none of them (unit test), so v2 passes. An
+  unreadable current implementation is compared against the empty set.
+- Config proposals (kinds 1-3) are R7 when they weaken the guard: **any** SetGuardian (adding a
+  guardian too: one rogue guardian can breakGlass and veto every way out), lowering the delay, any
+  SetPausedImpl.
+
+### Approval keys (what the approver must pass to `approveCodehash`)
+
+Looked up with `isApprovedCodehash(bytes32)`; sentinel-side convention, contract unchanged
+(`src/keys.mjs`). `sim_result.extra.approvalKey` shows the key the sentinel looked up.
+
+| Proposal | Key |
+|---|---|
+| R7: SetGuardian / SetDelay / SetPausedImpl (kinds 1, 2, 3) | `keccak256(abi.encode(uint8 kind, address target, uint256 value))`. SetGuardian: value 1 = add, 0 = remove; SetDelay: target `address(0)`, value = new delay; SetPausedImpl: value 0 (keyed by action, separate from upgrade codehashes) |
+| R8: upgrade with non-empty `data` | `keccak256(abi.encode(bytes32 codehash, bytes32 keccak256(data)))` |
+| R5 (STRICT) and the R9 exemption | the implementation's `codehash` itself |
+
+```js
+// viem
+actionHash = keccak256(encodeAbiParameters([{type:'uint8'},{type:'address'},{type:'uint256'}], [kind, target, value]))
+dataKey    = keccak256(encodeAbiParameters([{type:'bytes32'},{type:'bytes32'}], [codehash, keccak256(data)]))
+```
+```sh
+cast keccak $(cast abi-encode "f(uint8,address,uint256)" 1 0xGuardian 1)
+cast keccak $(cast abi-encode "f(bytes32,bytes32)" 0xCodehash $(cast keccak 0xDATA))
+```
 - The current implementation is read from the ERC-1967 slot (derived exactly as OZ defines it,
   checked against `ERC1967Utils.sol` in the unit test) to compute `selectorsAdded`.
 
@@ -126,8 +180,16 @@ default 0), `GET /health`, and `POST /attach {"id":N,"reportHash":"0x.."}` on se
 - `sim_result.extra`: `culprits` (probe selector + args whose logs show a mint/burn or ownership move),
   `skimmedTo` (watchlist addresses that received value during the plain transfer), `selectorsRemoved`,
   `probes`, `calls`, `simRpc`, `simRequestMs`, `retried`, `errors` (R6).
-- `veto_sent` is emitted when the raw tx goes out, before any RPC answers; `veto_receipt.extra` has
-  `vetoBlocksAfterPropose` and `blocksLeftForAttacker`.
+- `veto_sent` is emitted once the first broadcast RPC accepted the raw tx (`extra.acceptedBy`,
+  `extra.attempt`); `veto_receipt.extra` has `vetoBlocksAfterPropose`, `blocksLeftForAttacker` and
+  `replacedFrom` when a fee-bumped replacement was the one mined.
+- `veto_failed` (new type) `{ id, extra: { attempts, error, readyBlock, lastBlock } }`: every
+  broadcast attempt failed until lastBlock >= readyBlock. Retries back off 200 ms → 2 s and re-sync
+  the nonce from the **pending** count each round (also at start). "replacement transaction
+  underpriced" is a nonce error, not a delivery.
+- `proposal_seen.extra.backfill: true` when found by the startup `getProposal` scan.
+- `sim_result.extra`: also `thirdPartyDeltas` (R3B), `newOpcodes` (R9), `approvalKey` (R7/R8),
+  `truncated` (R6).
 - `reason_attached` is emitted once the attachReason tx has been accepted.
 
 ## Measurements
@@ -167,7 +229,7 @@ Real merged request for the deployed EvilMint impl (73 calls, 14.8 kB, same buil
   5 rounds 0 failures, veto +1 block, WS on the fallback after the 5 s connect timeout. Dead getCode
   racer (`READ_RACE=1`): the hedge starts as soon as the racer fails (codeMs about 10 ms), 0 failures.
 | dedupe | every proposal arrived on both WS and polling (20 duplicates dropped per sentinel in 20 proposals); one proposal_seen and at most one veto per sentinel |
-| R7 / R8 on anvil | remove guardian → R7, add guardian → pass, delay 30→10 → R7, 30→40 → pass, upgrade with init data → R8 |
+| R7 / R8 on anvil | remove guardian → R7, add guardian → R7, delay 30→10 → R7, 30→40 → pass, upgrade with init data → R8 |
 
 Testnet numbers (proposal_seen → veto_receipt, veto block, gas cost) are not measured yet: they
 need the 10143 deployment and a testnet broadcast started by the operator.
@@ -179,6 +241,33 @@ need the 10143 deployment and a testnet broadcast started by the operator.
   (89,535 × 1.10): so the sentinel
   multiplies gas.json limits by `GAS_HEADROOM` (default 1.25 → 123,112). Monad charges the gas
   limit, so a veto costs up to 25% more than with the tight limit.
+
+## Extended attack suite (2026-10-17)
+
+Regression: `test/e2e-bypass.mjs` deploys an extended set of attack implementations
+(`test/fixtures/Bypass.sol`, `test/fixtures/Evil.sol`, compiled out of tree, `BYPASS_OUT=<out dir>`)
+and proposes each against three live sentinels; `BYPASS_OUT=... node --test test/unit.test.mjs`
+also checks their selectors / opcodes offline.
+
+| Bypass | Now |
+|---|---|
+| EvilTransferFromImpl (transferFrom without allowance) | R3B |
+| EvilSweep (stranger moves holders[0]'s balance) | R3B |
+| TimeBombMintImpl (NUMBER), FlagMintImpl (STATICCALL+GAS), OriginMintImpl (ORIGIN) | R9 |
+| ThreeArgMintImpl, Evil3ArgMint (3-arg mint) | R1 (wide probe) |
+| EvilZeroSelMint / EvilZeroSelOwner (PUSH3 selectors) | R1 / R2 |
+| V2Init / V2Init3 without init data (anyone can call the reinitializer) | R2 |
+| add guardian / SetPausedImpl / v2 + init data | R7 / R7 (key actionHash) / R8 (key codehash+data) |
+| broadcast and /attach checks | "replacement underpriced" not delivered; text/plain /attach → 415, no ACAO; 41-selector impl → truncated → R6 |
+
+anvil `-b 0.3` (8587, SSE 8741-8743, token owner = GuardedAdmin from Deploy.s.sol): 15 bypass
+proposals vetoed x3 with the expected rule, 29 blocks left each; four cards 0 wrong verdicts.
+Backfill: sentinels stopped, EvilMint proposed, restarted with `LOOKBACK_BLOCKS=1 RESCAN_BLOCKS=1`:
+the startup scan judged it and it ended Vetoed x3 before readyBlock.
+
+Note: `script/export-shared.sh` regenerates `shared/rules.json` from its own list; it must include
+`R3B_THIRD_PARTY_FUNDS` and `R9_NEW_OPCODES` or the new entries (and their zh labels) are dropped
+(the sentinel itself recomputes every hash and still works).
 
 ## Next steps
 

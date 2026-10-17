@@ -88,8 +88,22 @@ const CHECK_NAMES = [
   [/^R1_/, 'totalSupply'],
   [/^R2_/, 'owner'],
   [/^R3_/, '收款地址到账'],
+  [/^R3B_/, '第三方余额'],
   [/^R4_/, '持有人正常转账'],
+  [/^R9_/, '危险操作码'],
 ];
+
+// R9: opcode names the sentinel reports (sentinel/src/bytecode.mjs DANGEROUS_OPCODES).
+const OPCODE_RE = /\b(ORIGIN|BLOCKHASH|COINBASE|TIMESTAMP|NUMBER|PREVRANDAO|GAS|CREATE2|CREATE|CALLCODE|DELEGATECALL|STATICCALL|CALL|SELFDESTRUCT)\b/g;
+function opcodeList(v) {
+  const s = Array.isArray(v) ? v.map(String).join(' ') : typeof v === 'string' ? v : '';
+  return [...new Set(s.toUpperCase().match(OPCODE_RE) ?? [])];
+}
+/** Opcodes present in `after` but not in `before` (either may be an array or a string). */
+export function addedOpcodes(before, after) {
+  const old = new Set(opcodeList(before));
+  return opcodeList(after).filter((o) => !old.has(o)).sort();
+}
 function displayName(raw) {
   for (const [re, label] of CHECK_NAMES) if (re.test(raw)) return label;
   return raw;
@@ -118,6 +132,27 @@ export function describeCheck(c, { decimals = null, symbol = '' } = {}) {
         ? `持有人转出 ${amt(exp)}，收款地址足额到账`
         : `持有人转出 ${amt(exp)}，收款地址实际到账 ${amt(got)}（差额 ${amt(d < 0n ? -d : d)}，${pctText(exp, d)}）`;
     return { raw, name, ok, beforeText: amt(exp), afterText: amt(got), deltaText: d ? amt(d) : '', pctText: d ? pctText(exp, d) : '', sentence };
+  }
+  // R3B: a stranger must not move anyone else's funds (transferFrom without allowance, or any probe).
+  if (/^R3B_/.test(raw)) {
+    const after = String(c?.after ?? '');
+    const n = after.match(/^(\d+) watched balance/);
+    let sentence;
+    if (ok) sentence = '陌生地址无法动用别人的余额';
+    else if (/succeed|success|true/i.test(after)) sentence = '陌生地址在没有任何授权的情况下，用 transferFrom 转走了持有人的余额';
+    else if (n) sentence = `陌生地址的调用改变了 ${n[1]} 个受监控地址的余额`;
+    else sentence = '陌生地址的调用改变了别人的余额';
+    return { raw, name, ok, beforeText: '', afterText: ok ? '未改动' : '被改动', deltaText: '', pctText: '', sentence };
+  }
+  // R9: new dangerous opcodes compared with the current implementation.
+  if (/^R9_/.test(raw)) {
+    const added = addedOpcodes(c?.before, c?.after);
+    const sentence = ok
+      ? '新实现没有新增危险操作码'
+      : added.length
+        ? `新实现比旧实现多了 ${added.length} 个危险操作码（${added.join('、')}）`
+        : '新实现包含旧实现没有的危险操作码';
+    return { raw, name, ok, beforeText: '', afterText: added.join('、'), deltaText: '', pctText: '', sentence, opcodes: added };
   }
   // R4: liveness flag.
   if (/^R4_/.test(raw) || (c?.before === 'transfer' && typeof c?.after === 'string')) {
@@ -180,6 +215,22 @@ export function buildFacts(sim, proposal, opts = {}) {
     .slice(0, 2)
     .map((x) => ({ ...x, text: `${shortHex(x.address)}（${x.delta > 0n ? '+' : ''}${formatAmount(x.delta, decimals)}${unitSym}）` }));
   const selectorsRemoved = Array.isArray(ex.selectorsRemoved) ? ex.selectorsRemoved.map(String) : [];
+  // R3B attribution: watched balances changed by stranger calls (extra.thirdPartyDeltas).
+  const thirdParty = (Array.isArray(ex.thirdPartyDeltas) ? ex.thirdPartyDeltas : [])
+    .map((x) => ({ address: x?.address, delta: toBigIntOrNull(x?.delta) }))
+    .filter((x) => typeof x.address === 'string' && x.delta !== null && x.delta !== 0n);
+  const thirdPartyShown = thirdParty
+    .slice(0, 2)
+    .map((x) => ({ ...x, text: `${shortHex(x.address)}（${x.delta > 0n ? '+' : ''}${formatAmount(x.delta, decimals)}${unitSym}）` }));
+  // R9: new dangerous opcodes, from extra (any of a few plausible names) or from the R9 check itself.
+  const r9 = checks.find((c) => /^R9_/.test(c.raw) && Array.isArray(c.opcodes) && c.opcodes.length);
+  const opcodesAdded = [
+    ...new Set(
+      [ex.opcodesAdded, ex.newOpcodes, ex.dangerousOpcodesAdded, ex.opcodes?.added]
+        .flatMap((v) => opcodeList(v))
+        .concat(r9 ? r9.opcodes : []),
+    ),
+  ].sort();
   const errorText = [sim?.error, sim?.extra?.error, sim?.extra?.detail, sim?.extra?.reason]
     .find((x) => typeof x === 'string' && x.trim()) ?? '';
 
@@ -212,6 +263,11 @@ export function buildFacts(sim, proposal, opts = {}) {
     skimmedTo,
     skimText: skimmedTo.map((x) => x.text).join('、'),
     selectorsRemoved,
+    thirdParty: thirdPartyShown,
+    thirdPartyCount: thirdParty.length,
+    thirdPartyText: thirdPartyShown.map((x) => x.text).join('、'),
+    opcodesAdded,
+    opcodesText: opcodesAdded.slice(0, 5).join('、') + (opcodesAdded.length > 5 ? ` 等 ${opcodesAdded.length} 个` : ''),
     errorText: errorText.slice(0, 120),
     symbol,
   };
@@ -246,6 +302,8 @@ function factLines(f) {
     L.push(`陌生地址调用后产生异常效果的函数选择器：${f.culprits.map((c) => `${c.selector}（${c.effects.join('/') || '异常'}）`).join('、')}`);
   }
   if (f.skimmedTo.length) L.push(`转账中多出的金额流向：${f.skimText}`);
+  if (f.thirdPartyCount) L.push(`陌生地址调用后余额被改动的地址（共 ${f.thirdPartyCount} 个）：${f.thirdPartyText}`);
+  if (f.opcodesAdded.length) L.push(`新实现新增的危险操作码（共 ${f.opcodesAdded.length} 个）：${f.opcodesText}`);
   if (f.errorText) L.push(`模拟错误信息：${f.errorText}`);
   if (f.simMs !== null) L.push(`模拟耗时：${f.simMs} 毫秒`);
   return L;

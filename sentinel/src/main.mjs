@@ -11,8 +11,9 @@ import { clientFor, allClients, createFailover, keepWarm, isRetryable, suspect }
 import { createEventServer } from './sse.mjs'
 import { Vetoer, readGasLimits } from './vetoer.mjs'
 import { buildSimulation, evaluateSimulation, implFromSlot, IMPLEMENTATION_SLOT, ViewRevert } from './simulate.mjs'
-import { extractSelectors } from './bytecode.mjs'
+import { extractSelectors, dangerousOpcodes } from './bytecode.mjs'
 import { makeLogger, sleep, retry } from './util.mjs'
+import { approvalKeyFor, upgradeDataKey } from './keys.mjs'
 
 const cfg = loadConfig()
 const log = makeLogger(cfg.source)
@@ -26,6 +27,7 @@ const D = {
   guardedAdmin: lc(dep.guardedAdmin),
   proxy: lc(dep.proxy),
   owner: lc(dep.owner),
+  tokenOwner: lc(dep.tokenOwner),
   holders: (dep.holders ?? []).map((h) => lc(typeof h === 'string' ? h : h.address)),
   deployBlock: Number(dep.deployBlock ?? 0),
 }
@@ -126,18 +128,23 @@ async function fetchNewCode(addr, codehash) {
     return { code: c, label: main.label }
   }
 }
-// Current implementation (ERC-1967 slot) and its selectors, refreshed in the background; only used
-// for selectorsAdded/Removed (informational), never for the verdict.
-const implCache = { impl: null, at: 0, selectors: new Map() }
-async function currentImplSelectors() {
+// Current implementation (ERC-1967 slot): its selectors (selectorsAdded/Removed, informational) and
+// its R9 opcode set (the baseline a new implementation is compared against). Refreshed in the
+// background; the code itself is cached by address.
+const implCache = { impl: null, at: 0, info: new Map() }
+async function currentImplInfo() {
   let impl = implCache.impl
   if (!impl || Date.now() - implCache.at > 15_000) {
     impl = implFromSlot(await main.call('eth_getStorageAt', [D.proxy, IMPLEMENTATION_SLOT, 'latest']))
     implCache.impl = impl
     implCache.at = Date.now()
   }
-  if (!implCache.selectors.has(impl)) implCache.selectors.set(impl, extractSelectors(await getCode(impl)))
-  return implCache.selectors.get(impl)
+  if (!implCache.info.has(impl)) {
+    const code = await getCode(impl)
+    if (!code || code === '0x') throw new Error(`current impl ${impl} has no code on ${main.label}`)
+    implCache.info.set(impl, { impl, selectors: extractSelectors(code), ops: dangerousOpcodes(code) })
+  }
+  return implCache.info.get(impl)
 }
 const isApproved = async (hash) => {
   if (!hash || BigInt(hash) === 0n) return false
@@ -148,9 +155,6 @@ const isApproved = async (hash) => {
     return false
   }
 }
-// Config proposals carry codehash 0; their approval key is keccak256(abi.encode(kind, target, value)).
-const actionHash = (kind, target, value) =>
-  keccak256(encodeAbiParameters([{ type: 'uint8' }, { type: 'address' }, { type: 'uint256' }], [kind, target, value]))
 
 // ---------------------------------------------------------------- state
 const state = {
@@ -169,7 +173,7 @@ const pendingFinality = [] // { kind: 'veto'|'proposal', ... }
 // ---------------------------------------------------------------- SSE / control server
 const vetoer = new Vetoer({
   account, chainId: D.chainId, guardedAdmin: D.guardedAdmin, abi: abis.guardedAdmin, gasLimits, mainRpc: main,
-  broadcastRpcs, rules, log, feeRefreshMs: cfg.feeRefreshMs, dryRun: cfg.dryRun,
+  broadcastRpcs, rules, log, feeRefreshMs: cfg.feeRefreshMs, dryRun: cfg.dryRun, replaceAfterMs: cfg.replaceAfterMs,
 })
 
 const server = createEventServer({
@@ -184,6 +188,7 @@ const server = createEventServer({
     guardian: account.address, nonce: vetoer.nonce, strict: cfg.strict, dryRun: cfg.dryRun, proposalsSeen: seen.size, duplicatesDropped: state.duplicates,
   }),
   onAttach: cfg.attach ? handleAttach : null,
+  attachSecret: cfg.attachSecret,
 })
 const emit = (type, fields) => server.emit(type, fields)
 const healthy = () => Date.now() - Math.max(state.lastPollOk, state.lastWsHead) < 2_000
@@ -192,6 +197,13 @@ async function handleAttach(body) {
   const id = Number(body?.id)
   const reportHash = body?.reportHash
   if (!Number.isInteger(id) || id <= 0 || !/^0x[0-9a-fA-F]{64}$/.test(reportHash ?? '')) return { ok: false, error: 'need id (int) and reportHash (bytes32 hex)' }
+  // Only spend a nonce (and gas) on a proposal that exists on chain.
+  try {
+    const pr = await ethCall(D.guardedAdmin, abis.guardedAdmin, 'getProposal', [BigInt(id)])
+    if (Number(pr.status) === 0) return { ok: false, error: `unknown proposal ${id}` }
+  } catch (e) {
+    return { ok: false, error: `getProposal(${id}) failed: ${e.message.slice(0, 160)}` }
+  }
   try {
     const tx = await vetoer.send('attachReason', [BigInt(id), reportHash])
     emit('reason_attached', { id, txHash: tx.txHash, reportHash })
@@ -238,8 +250,9 @@ async function judge(p) {
     let weakening = false
     let what = ''
     if (kind === 1) {
-      weakening = BigInt(p.value) === 0n
-      what = weakening ? `remove guardian ${p.target}` : `add guardian ${p.target}`
+      // Adding a guardian is weakening too: one rogue guardian can breakGlass and veto every way out.
+      weakening = true
+      what = BigInt(p.value) === 0n ? `remove guardian ${p.target}` : `add guardian ${p.target}`
     } else if (kind === 2) {
       const cur = state.delayBlocks ?? BigInt(await ethCall(D.guardedAdmin, abis.guardedAdmin, 'delayBlocks').catch(() => 2n ** 64n))
       weakening = BigInt(p.value) < BigInt(cur)
@@ -249,7 +262,9 @@ async function judge(p) {
       what = `paused impl -> ${p.target}`
     }
     if (!weakening) return pass([{ name: 'R7_CONFIG_GUARD', before: what, after: 'not weakening', ok: true }])
-    const key = BigInt(p.codehash) !== 0n ? p.codehash : actionHash(kind, p.target, BigInt(p.value))
+    // Always keccak256(abi.encode(uint8 kind, address target, uint256 value)), also for SetPausedImpl
+    // (an approval of an upgrade codehash must not double as approval of a paused-impl swap).
+    const key = approvalKeyFor(p)
     const approved = await isApproved(key)
     const check = { name: 'R7_CONFIG_GUARD', before: what, after: approved ? 'approved' : 'not approved', ok: approved }
     return approved ? pass([check], { approvalKey: key }) : veto('R7_CONFIG_GUARD', [check], { approvalKey: key })
@@ -258,42 +273,77 @@ async function judge(p) {
   // kind 0: upgrade. Only newImpl's code is on the critical path (raced over the warm read
   // providers); holder balance and the current impl's selectors come from background caches.
   const hasData = p.data && p.data !== '0x'
-  const oldSelP = currentImplSelectors().catch((e) => {
-    log.warn(`current impl selectors: ${e.message.slice(0, 120)}`)
+  const oldInfoP = currentImplInfo().catch((e) => {
+    log.warn(`current impl info: ${e.message.slice(0, 120)}`)
     return null
   })
-  const [{ code: newCode, label: codeRpc }, approved] = await Promise.all([
+  // R8 key binds the init data: keccak256(abi.encode(bytes32 codehash, bytes32 keccak256(data))).
+  const dataKey = hasData ? upgradeDataKey(p.codehash, p.data) : null
+  const [{ code: newCode, label: codeRpc }, approved, dataApproved] = await Promise.all([
     fetchNewCode(p.target, p.codehash),
-    cfg.strict || hasData ? isApproved(p.codehash) : Promise.resolve(false),
+    cfg.strict ? isApproved(p.codehash) : Promise.resolve(false),
+    hasData ? isApproved(dataKey) : Promise.resolve(false),
   ])
   const codeMs = Date.now() - t
   if (cfg.strict && !approved) {
     return veto('R5_STRICT_CODEHASH', [{ name: 'R5_STRICT_CODEHASH', before: p.codehash, after: 'not approved', ok: false }])
   }
-  if (hasData && !approved) {
-    return veto('R8_INIT_DATA', [{ name: 'R8_INIT_DATA', before: `${(p.data.length - 2) / 2} bytes init data`, after: 'codehash not approved', ok: false }])
+  if (hasData && !dataApproved) {
+    return veto('R8_INIT_DATA', [{ name: 'R8_INIT_DATA', before: `${(p.data.length - 2) / 2} bytes init data`, after: 'codehash+data not approved', ok: false }], { approvalKey: dataKey })
   }
   if (!newCode || newCode === '0x' || keccak256(newCode) !== lc(p.codehash)) {
     return veto('R6_SIM_FAILURE', [{ name: 'R6_SIM_FAILURE', before: p.codehash, after: 'code missing or codehash mismatch', ok: false }])
   }
-  const holder = D.holders[0]
-  let bal = state.holderBalance.get(holder)
-  if (!bal) bal = BigInt(await ethCall(D.proxy, abis.token, 'balanceOf', [holder]))
+  // R4/R3 need a holder that actually has funds: the first with a balance > 0 (cached by the
+  // background refresh, read live when the cache is empty); all zero -> R6.
+  let holder = D.holders.find((h) => (state.holderBalance.get(h) ?? 0n) > 0n)
+  if (!holder) {
+    for (const h of D.holders) {
+      const b = BigInt(await ethCall(D.proxy, abis.token, 'balanceOf', [h]))
+      state.holderBalance.set(h, b)
+      if (b > 0n) {
+        holder = h
+        break
+      }
+    }
+  }
+  if (!holder) return veto('R6_SIM_FAILURE', [{ name: 'R6_SIM_FAILURE', before: 'holders', after: 'every watched holder has balance 0', ok: false }])
+  const bal = state.holderBalance.get(holder)
   const amount = bal / 100n > 0n ? bal / 100n : 1n
 
   const { params, layout } = buildSimulation({
-    proxy: D.proxy, newImpl: p.target, newCode, holder, amount, watch: [D.owner, ...D.holders],
+    proxy: D.proxy, newImpl: p.target, newCode, holder, amount, watch: [D.owner, ...(D.tokenOwner ? [D.tokenOwner] : []), ...D.holders],
     tokenAbi: abis.token, callGas: cfg.simCallGas, readGas: cfg.simReadGas, maxCalls: cfg.simMaxCalls,
   })
+  if (layout.truncated) {
+    // More probes than SIM_MAX_CALLS allows: an unprobed selector could be the backdoor (fail-closed).
+    return veto('R6_SIM_FAILURE', [{ name: 'R6_SIM_FAILURE', before: `${layout.wantedProbes} probes needed`, after: `only ${layout.probes.length} fit in SIM_MAX_CALLS=${cfg.simMaxCalls}`, ok: false }], { truncated: true, selectors: layout.selectors.length })
+  }
   const simT = Date.now()
   const { result, rpc, errors, reusedSocket } = await simulate(params)
   const simRequestMs = Date.now() - simT
-  const oldSelectors = await oldSelP
+  const oldInfo = await oldInfoP
+  const oldSelectors = oldInfo?.selectors ?? null
   if (!result) {
     return veto('R6_SIM_FAILURE', [{ name: 'R6_SIM_FAILURE', before: 'eth_simulateV1', after: `failed on ${errors.length} provider(s)`, ok: false }], { errors })
   }
   try {
     const r = evaluateSimulation(result, layout, { tokenAbi: abis.token, oldSelectors: oldSelectors ?? [] })
+    // R9 (static, after a passing simulation): opcodes the current implementation does not have and
+    // that let code behave differently after the simulation (block/tx context, external calls,
+    // create, selfdestruct). Unknown current impl -> compared against the empty set (fail-closed).
+    const newOps = dangerousOpcodes(newCode)
+    const addedOps = newOps.filter((o) => !(oldInfo?.ops ?? []).includes(o))
+    if (r.verdict === 'pass' && addedOps.length) {
+      const ok9 = approved || (await isApproved(p.codehash))
+      const check9 = { name: 'R9_NEW_OPCODES', before: (oldInfo?.ops ?? []).join(' ') || 'none', after: `new: ${addedOps.join(' ')}${ok9 ? ' (codehash approved)' : ''}`, ok: ok9 }
+      r.checks.push(check9)
+      if (!ok9) {
+        r.verdict = 'veto'
+        r.rule = 'R9_NEW_OPCODES'
+      }
+      r.extra.newOpcodes = addedOps
+    }
     return {
       ...r,
       simMs: Date.now() - t,
@@ -322,21 +372,26 @@ async function onProposedLog(lg, path) {
   if (ev.eventName !== 'Proposed') return
   const id = Number(ev.args.id)
   if (seen.has(id)) {
-    state.duplicates++ // WS and polling both deliver: dedupe by proposal id
+    if (path !== 'rescan') state.duplicates++ // WS and polling both deliver: dedupe by proposal id
     return
   }
-  const t0 = Date.now()
-  const p = {
+  return handleProposal({
     id, kind: Number(ev.args.kind), target: lc(ev.args.target), value: ev.args.value, data: ev.args.data,
     codehash: lc(ev.args.codehash), readyBlock: Number(ev.args.readyBlock),
     proposeBlock: Number(lg.blockNumber), blockHash: lg.blockHash, txHash: lg.transactionHash,
-  }
+  }, path === 'rescan' ? 'poll' : path)
+}
+
+async function handleProposal(p, path, extra) {
+  const id = p.id
+  if (seen.has(id)) return
+  const t0 = Date.now()
   seen.set(id, { t0, ...p })
   if (state.nextId == null || id + 1 > state.nextId) {
     state.nextId = id + 1
     vetoer.presign(state.nextId).catch(() => {})
   }
-  emit('proposal_seen', { id, kind: p.kind, target: p.target, codehash: p.codehash, proposeBlock: p.proposeBlock, readyBlock: p.readyBlock, path })
+  emit('proposal_seen', { id, kind: p.kind, target: p.target, codehash: p.codehash, proposeBlock: p.proposeBlock, readyBlock: p.readyBlock, path, ...(extra ? { extra } : {}) })
   pendingFinality.push({ type: 'proposal', id, block: p.proposeBlock, txHash: p.txHash })
   if (state.lastBlock && p.readyBlock <= state.lastBlock) log.warn(`#${id} already past readyBlock ${p.readyBlock} (seen at ${state.lastBlock})`)
 
@@ -352,32 +407,55 @@ async function onProposedLog(lg, path) {
 
   // Veto first (broadcast starts before anything else), then tell the screens.
   // sim_result is emitted synchronously before the (async) signing/broadcast continues, and
-  // veto_sent fires the moment the raw tx goes out (before any RPC answers).
-  const sending = j.verdict === 'veto'
-    ? vetoer.send('veto', [BigInt(id), ruleHash], { onBroadcast: ({ txHash, rpcs }) => emit('veto_sent', { id, txHash, rpcs }) })
-    : null
+  // veto_sent fires once the first RPC has accepted the raw tx.
+  const sending = j.verdict === 'veto' ? sendVetoWithRetry(p, ruleHash) : null
   emit('sim_result', { id, verdict: j.verdict, rule: j.rule, ruleHash, checks: j.checks, selectorsAdded: j.selectorsAdded, simMs: j.simMs, extra: j.extra })
   log.info(`#${id} kind=${p.kind} ${j.verdict}${j.rule ? ' ' + j.rule : ''} in ${j.simMs} ms`)
   if (!sending) return
 
-  let tx
-  try {
-    tx = await sending
-  } catch (e) {
-    return log.error(`#${id} veto broadcast failed: ${e.message}`)
-  }
+  const tx = await sending
+  if (!tx) return
   if (tx.dryRun) return log.info(`#${id} DRY_RUN: veto signed (${tx.txHash}) but not broadcast`)
   try {
     const r = await tx.receipt
     const block = Number(r.blockNumber)
+    const minedHash = r.transactionHash ?? tx.txHash
+    if (r.status !== '0x1' && r.status !== 1) log.warn(`#${id} veto ${minedHash} reverted in ${block}`)
     emit('veto_receipt', {
-      id, txHash: tx.txHash, block, status: r.status === '0x1' ? 'success' : 'reverted', gasUsed: Number(r.gasUsed),
+      id, txHash: minedHash, block, status: r.status === '0x1' ? 'success' : 'reverted', gasUsed: Number(r.gasUsed),
       gasLimit: Number(tx.gasLimit), effectiveGasPrice: BigInt(r.effectiveGasPrice ?? 0).toString(), latencyMs: Date.now() - t0,
-      extra: { vetoBlocksAfterPropose: block - p.proposeBlock, blocksLeftForAttacker: p.readyBlock - block },
+      extra: { vetoBlocksAfterPropose: block - p.proposeBlock, blocksLeftForAttacker: p.readyBlock - block, ...(minedHash !== tx.txHash ? { replacedFrom: tx.txHash } : {}) },
     })
-    pendingFinality.push({ type: 'veto', id, block, txHash: tx.txHash })
+    pendingFinality.push({ type: 'veto', id, block, txHash: minedHash })
   } catch (e) {
     log.error(`#${id} veto receipt: ${e.message}`)
+  }
+}
+
+// Broadcast the veto; on failure back off and retry (re-syncing the nonce from the pending count
+// each round) for as long as the proposal can still be vetoed (lastBlock < readyBlock). Gives up
+// with a veto_failed event. Resolves with the vetoer's tx (or null when it gave up).
+async function sendVetoWithRetry(p, ruleHash) {
+  const id = p.id
+  let attempt = 0
+  let backoff = cfg.vetoRetryMs
+  for (;;) {
+    attempt++
+    try {
+      return await vetoer.send('veto', [BigInt(id), ruleHash], {
+        onBroadcast: ({ txHash, rpcs, acceptedBy }) => emit('veto_sent', { id, txHash, rpcs, extra: { acceptedBy, attempt } }),
+      })
+    } catch (e) {
+      const blocksLeft = p.readyBlock - state.lastBlock
+      log.error(`#${id} veto broadcast attempt ${attempt} failed (${blocksLeft} blocks left): ${e.message.slice(0, 300)}`)
+      if (state.lastBlock >= p.readyBlock) {
+        emit('veto_failed', { id, extra: { attempts: attempt, error: e.message.slice(0, 300), readyBlock: p.readyBlock, lastBlock: state.lastBlock } })
+        return null
+      }
+      await sleep(Math.round(backoff * (0.75 + Math.random() * 0.5)))
+      backoff = Math.min(backoff * 2, 2_000)
+      await vetoer.resyncNonce().catch((err) => log.warn(`nonce resync: ${err.message.slice(0, 160)}`))
+    }
   }
 }
 
@@ -429,12 +507,17 @@ async function pollOnce() {
   state.lastBlock = Math.max(state.lastBlock, latest)
   state.lastPollOk = Date.now()
   if (cursor == null) cursor = Math.max(D.deployBlock - 1, latest - cfg.lookbackBlocks)
-  while (cursor < latest) {
-    const from = cursor + 1
+  // Every round re-scans the last RESCAN_BLOCKS blocks: a node that served getLogs for a block before
+  // it had indexed it (or a reorg) cannot make us miss a proposal; the id dedupe absorbs repeats.
+  const done = cursor
+  let c = Math.max(D.deployBlock - 1, Math.min(cursor, latest - cfg.rescanBlocks))
+  while (c < latest) {
+    const from = c + 1
     const to = Math.min(latest, from + cfg.getLogsMaxRange - 1) // at most 100 blocks per request
     const logs = await main.call('eth_getLogs', [{ address: D.guardedAdmin, topics: [PROPOSED_TOPIC], fromBlock: numberToHex(from), toBlock: numberToHex(to) }])
-    for (const lg of logs) onProposedLog(lg, 'poll').catch((e) => log.error(`poll handler: ${e.message}`))
-    cursor = to // advance only after success; on error the cursor stays put
+    for (const lg of logs) onProposedLog(lg, Number(lg.blockNumber) <= done ? 'rescan' : 'poll').catch((e) => log.error(`poll handler: ${e.message}`))
+    c = to
+    cursor = Math.max(cursor, to) // advance only after success; on error the cursor stays put
   }
 }
 async function pollLoop() {
@@ -545,6 +628,32 @@ function startWs() {
   connect()
 }
 
+// ---------------------------------------------------------------- startup backfill
+// Proposals made while this sentinel was down (older than the getLogs lookback) are still vetoable
+// while Pending and readyBlock > latest: read them with getProposal / getProposalData and judge.
+async function backfill() {
+  try {
+    const latest = Number(await main.call('eth_blockNumber'))
+    const next = Number(await ethCall(D.guardedAdmin, abis.guardedAdmin, 'nextId'))
+    const first = Math.max(1, next - cfg.backfillMax)
+    let n = 0
+    for (let id = next - 1; id >= first; id--) {
+      if (seen.has(id)) continue
+      const pr = await ethCall(D.guardedAdmin, abis.guardedAdmin, 'getProposal', [BigInt(id)])
+      if (Number(pr.status) !== 1 || Number(pr.readyBlock) <= latest || seen.has(id)) continue
+      const data = Number(pr.kind) === 0 ? await ethCall(D.guardedAdmin, abis.guardedAdmin, 'getProposalData', [BigInt(id)]) : '0x'
+      n++
+      handleProposal({
+        id, kind: Number(pr.kind), target: lc(pr.target), value: pr.value, data, codehash: lc(pr.codehash),
+        readyBlock: Number(pr.readyBlock), proposeBlock: Number(pr.proposedBlock), blockHash: null, txHash: null,
+      }, 'poll', { backfill: true }).catch((e) => log.error(`backfill #${id}: ${e.message}`))
+    }
+    log.info(`backfill: ids ${first}..${next - 1} checked, ${n} pending proposal(s) judged`)
+  } catch (e) {
+    log.warn(`backfill: ${e.message.slice(0, 200)}`)
+  }
+}
+
 // ---------------------------------------------------------------- background refreshers
 async function refreshViews() {
   try {
@@ -555,9 +664,9 @@ async function refreshViews() {
     state.delayBlocks = BigInt(d)
     if (state.nextId == null || Number(n) > state.nextId) state.nextId = Number(n)
     await vetoer.presign(state.nextId)
-    for (const h of D.holders.slice(0, 1)) state.holderBalance.set(h, BigInt(await ethCall(D.proxy, abis.token, 'balanceOf', [h])))
+    for (const h of D.holders) state.holderBalance.set(h, BigInt(await ethCall(D.proxy, abis.token, 'balanceOf', [h])))
     implCache.at = 0 // re-read the ERC-1967 slot so an executed upgrade shows up within one refresh
-    await currentImplSelectors()
+    await currentImplInfo()
   } catch (e) {
     log.warn(`view refresh: ${e.message.slice(0, 160)}`)
   }
@@ -578,6 +687,7 @@ keepWarm(allClients(), cfg.keepaliveMs)
 setInterval(() => emit('heartbeat', { lastBlock: state.lastBlock, rpc: main.label, ok: healthy() }), cfg.heartbeatMs)
 startWs()
 pollLoop()
+backfill()
 log.info(`up: guardedAdmin=${D.guardedAdmin} proxy=${D.proxy} sse=:${cfg.ssePort} read=[${readClients.map((c) => c.label).join(' > ')}] sim=[${simOrder.map((s) => s.label).join(', ')}] ws=${cfg.wsUrls.length ? 'on' : 'off'} keepalive=${cfg.keepaliveMs} strict=${cfg.strict} attach=${cfg.attach}`)
 
 const shutdown = async () => {

@@ -16,6 +16,8 @@ const GUARDED_ADMIN_MIN = parseAbi([
   'function delayBlocks() view returns (uint64)',
   'function isApprovedCodehash(bytes32) view returns (bool)',
   'function proxy() view returns (address)',
+  'function getProposal(uint256 id) view returns ((uint8 kind, uint8 status, address proposer, address target, uint256 value, bytes32 codehash, bytes32 dataHash, uint64 proposedBlock, uint64 readyBlock, uint256 vetoCount))',
+  'function getProposalData(uint256 id) view returns (bytes)',
   'error NotGuardian()',
   'error UnknownProposal(uint256 id)',
   'error AlreadyExecuted(uint256 id)',
@@ -26,6 +28,7 @@ const TOKEN_MIN = parseAbi([
   'function owner() view returns (address)',
   'function balanceOf(address) view returns (uint256)',
   'function transfer(address to, uint256 amount) returns (bool)',
+  'function transferFrom(address from, address to, uint256 amount) returns (bool)',
   'event Transfer(address indexed from, address indexed to, uint256 value)',
   'event OwnershipTransferred(address indexed previousOwner, address indexed newOwner)',
 ])

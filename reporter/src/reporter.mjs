@@ -31,6 +31,8 @@ export function configFromEnv(env = process.env) {
       .filter(Boolean),
     attachUrl: env.ATTACH_URL ?? 'http://127.0.0.1:8701/attach',
     attachTimeoutMs: int(env.ATTACH_TIMEOUT_MS, 4000),
+    // Shared secret for sentinel-1's POST /attach (sent as x-attach-secret). Unset -> header omitted.
+    attachSecret: env.ATTACH_SECRET || '',
     reportsDir: path.resolve(REPORTER_DIR, env.REPORTS_DIR || 'reports'),
     rulesPath: path.resolve(REPO_DIR, env.RULES_PATH || 'shared/rules.json'),
     aggMs: int(env.AGG_MS, 400),
@@ -247,9 +249,11 @@ export async function startReporter(cfg = configFromEnv(), { log = console.log }
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), cfg.attachTimeoutMs);
     try {
+      const headers = { 'content-type': 'application/json' };
+      if (cfg.attachSecret) headers['x-attach-secret'] = cfg.attachSecret;
       const res = await fetch(cfg.attachUrl, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers,
         body: JSON.stringify({ id, reportHash }),
         signal: ctrl.signal,
       });

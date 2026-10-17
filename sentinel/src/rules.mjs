@@ -14,6 +14,8 @@ export const RULE_IDS = [
   'R6_SIM_FAILURE',
   'R7_CONFIG_GUARD',
   'R8_INIT_DATA',
+  'R3B_THIRD_PARTY_FUNDS',
+  'R9_NEW_OPCODES',
 ]
 
 export const ruleKey = (id) => `GUARD/${id}`

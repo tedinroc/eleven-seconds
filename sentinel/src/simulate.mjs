@@ -1,7 +1,8 @@
 // Attack simulation (spec 4.2): one merged eth_simulateV1 request per proposal per sentinel.
 // The proxy's ERC-1967 implementation slot is overridden (stateDiff, other storage kept) with the
 // proposed implementation, then inside a single simulated block:
-//   baseline reads -> holder transfer (R3/R4) -> reads -> stranger probes (R1/R2) -> reads.
+//   baseline reads -> holder transfer (R3/R4) -> reads -> stranger transferFrom (R3B) ->
+//   stranger probes (R1/R2/R3B) -> reads (totalSupply, owner, every watched balance).
 // State carries over between calls of the same simulated block (verified before the event).
 import { decodeFunctionResult, encodeFunctionData, keccak256, numberToHex, pad, stringToBytes, toHex, decodeEventLog } from 'viem'
 import { extractSelectors } from './bytecode.mjs'
@@ -17,13 +18,28 @@ const BIG = 2n ** 128n
 const randomAddress = () => toHex(crypto.getRandomValues(new Uint8Array(20)))
 const word = (x) => pad(typeof x === 'bigint' ? numberToHex(x) : x, { size: 32 }).slice(2)
 
-// Generic argument sets from spec 4.2: none, stranger, stranger + big, big.
-function probeCalldata(selector, stranger) {
+// Generic argument sets from spec 4.2: none, stranger, stranger + big, big, plus a wide set of 8
+// words (stranger, big, big, stranger, 0, 0, 0, 0) so that 3+ argument backdoors (rescue(to, amount,
+// memo)) decode instead of reverting in the ABI decoder.
+export const PROBES_PER_SELECTOR = 5
+export const FALLBACK_PROBES = 2
+export function probeCalldata(selector, stranger) {
   return [
     { args: 'none', data: selector },
     { args: 'addr', data: selector + word(stranger) },
     { args: 'addr,big', data: selector + word(stranger) + word(BIG) },
     { args: 'big', data: selector + word(BIG) },
+    { args: 'wide', data: selector + word(stranger) + word(BIG) + word(BIG) + word(stranger) + word(0n) + word(0n) + word(0n) + word(0n) },
+  ]
+}
+// Fallback / receive probes: empty calldata and calldata with a random unknown selector.
+export function fallbackCalldata(stranger, selectors = []) {
+  let sel
+  do sel = toHex(crypto.getRandomValues(new Uint8Array(4)))
+  while (selectors.includes(sel))
+  return [
+    { args: 'empty', data: '0x' },
+    { args: 'random', data: sel + word(stranger) + word(BIG) + word(BIG) },
   ]
 }
 
@@ -62,20 +78,34 @@ export function buildSimulation({ proxy, newImpl, newCode, holder, amount, watch
     _fn: 'transfer',
   })
   layout.r1 = readAll('afterTransfer')
+  // R3B: a stranger without any allowance must not be able to pull the holder's funds.
+  layout.transferFrom = calls.length
+  calls.push({
+    from: stranger,
+    to: proxy,
+    data: encodeFunctionData({ abi: tokenAbi, functionName: 'transferFrom', args: [holder, stranger, amount] }),
+    gas: numberToHex(callGas),
+    _tag: 'transferFrom',
+    _fn: 'transferFrom',
+  })
 
   const selectors = extractSelectors(newCode)
   layout.selectors = selectors
   layout.probes = []
-  const reserve = 3 // final reads
-  for (const sel of selectors) {
-    for (const p of probeCalldata(sel, stranger)) {
-      if (calls.length + reserve >= maxCalls) break
-      layout.probes.push({ index: calls.length, selector: sel, args: p.args })
-      calls.push({ from: stranger, to: proxy, data: p.data, gas: numberToHex(callGas), _tag: 'probe' })
-    }
+  const reserve = 2 + watchList.length // final reads
+  const wanted = [
+    ...selectors.flatMap((sel) => probeCalldata(sel, stranger).map((p) => ({ selector: sel, ...p }))),
+    ...fallbackCalldata(stranger, selectors).map((p) => ({ selector: 'fallback', ...p })),
+  ]
+  for (const p of wanted) {
+    if (calls.length + reserve >= maxCalls) break
+    layout.probes.push({ index: calls.length, selector: p.selector, args: p.args })
+    calls.push({ from: stranger, to: proxy, data: p.data, gas: numberToHex(callGas), _tag: 'probe' })
   }
-  layout.truncated = layout.probes.length < selectors.length * 4
-  layout.r2 = { totalSupply: read('totalSupply', [], 'final:totalSupply'), owner: read('owner', [], 'final:owner') }
+  // Not every probe fits under SIM_MAX_CALLS: the caller must fail closed (R6), never pass.
+  layout.truncated = layout.probes.length < wanted.length
+  layout.wantedProbes = wanted.length
+  layout.r2 = readAll('final')
 
   const stateOverrides = { [proxy]: { stateDiff: { [IMPLEMENTATION_SLOT]: pad(newImpl.toLowerCase(), { size: 32 }) } } }
   // Note: no `validation` field at all (Monad RPCs reject validation:false with -32000), and every
@@ -136,6 +166,32 @@ export function evaluateSimulation(result, layout, { tokenAbi, oldSelectors }) {
     { name: 'R4_TRANSFER_LIVENESS', before: 'transfer', after: transferOk ? 'success' : 'reverted', ok: transferOk },
   ]
 
+  // R3B: transferFrom(holder, stranger, X) from a stranger with no allowance must revert (or return
+  // false), and no stranger call (that one or any probe) may change anyone's watched balance.
+  let pulled = false
+  if (layout.transferFrom != null) {
+    const tf = res[layout.transferFrom]
+    if (ok(layout.transferFrom)) {
+      pulled = true
+      if (tf.returnData && tf.returnData !== '0x') {
+        try {
+          pulled = decodeFunctionResult({ abi: tokenAbi, functionName: 'transferFrom', data: tf.returnData }) !== false
+        } catch {
+          pulled = true
+        }
+      }
+    }
+  }
+  const touched = s2.balances
+    ? layout.watchList.map((a, k) => ({ address: a, delta: s2.balances[k] - s1.balances[k] })).filter(({ delta }) => delta !== 0n)
+    : []
+  checks.push({
+    name: 'R3B_THIRD_PARTY_FUNDS',
+    before: 'transferFrom(holder, stranger) without allowance',
+    after: pulled ? 'succeeded' : touched.length ? `${touched.length} watched balance(s) changed by stranger calls` : 'reverted, balances unchanged',
+    ok: !pulled && touched.length === 0,
+  })
+
   // Attribution from the logs of the same request (free): which stranger probe minted/burned or
   // moved ownership. Used by the report, never by the verdict.
   const culprits = []
@@ -160,14 +216,14 @@ export function evaluateSimulation(result, layout, { tokenAbi, oldSelectors }) {
   const selectorsAdded = layout.selectors.filter((s) => !old.has(s))
   const selectorsRemoved = (oldSelectors ?? []).filter((s) => !layout.selectors.includes(s))
 
-  // Priority when several invariants break: liveness, conservation, owner, supply.
-  const order = ['R4_TRANSFER_LIVENESS', 'R3_TRANSFER_CONSERVATION', 'R2_OWNER', 'R1_TOTAL_SUPPLY']
+  // Priority when several invariants break: liveness, conservation, owner, supply, third-party funds.
+  const order = ['R4_TRANSFER_LIVENESS', 'R3_TRANSFER_CONSERVATION', 'R2_OWNER', 'R1_TOTAL_SUPPLY', 'R3B_THIRD_PARTY_FUNDS']
   const failed = order.find((n) => !checks.find((c) => c.name === n).ok) ?? null
   return {
     verdict: failed ? 'veto' : 'pass',
     rule: failed,
     checks,
     selectorsAdded,
-    extra: { selectorsRemoved, culprits, skimmedTo, probes: layout.probes.length, truncated: layout.truncated, calls: layout.calls.length },
+    extra: { selectorsRemoved, culprits, skimmedTo, thirdPartyDeltas: touched, probes: layout.probes.length, truncated: layout.truncated, calls: layout.calls.length },
   }
 }

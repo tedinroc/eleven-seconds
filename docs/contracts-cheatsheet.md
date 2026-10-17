@@ -6,7 +6,7 @@ driver 還沒好之前，操作者可以直接用這份小抄在 anvil 或測試
 
 | 路徑 | 內容 |
 |---|---|
-| `src/GuardedAdmin.sol` | 冷靜期＋否決＋breakGlass，ProxyAdmin 的 owner |
+| `src/GuardedAdmin.sol` | 冷靜期＋否決＋breakGlass，ProxyAdmin 與代幣（Ownable）的 owner |
 | `src/DemoBTC.sol`、`src/DemoBTCV2.sol` | DemoBTC（dBTC，8 位小數）v1 與 v2（多 `version()` 回傳 "2"） |
 | `src/PausedImpl.sol` | breakGlass 目標：view 正常，轉帳／mint 一律 `TokenPaused()` |
 | `src/attack/` | EvilMintImpl（R1）、EvilOwnerImpl（R2，`claimOwner()`）、EvilFeeImpl（R3，轉帳抽 10% 給 owner）。**示範用惡意碼，不上 Sourcify** |
@@ -84,6 +84,7 @@ cast call $GA "isWired()(bool)"; cast call $GA "paused()(bool)"; cast call $GA "
 cast implementation $TOKEN       # 目前 impl（讀 ERC-1967 slot）
 cast admin $TOKEN                # ProxyAdmin 位址
 cast call $PA "owner()(address)" # 應該是 $GA
+cast call $TOKEN "owner()(address)" # 代幣 owner 也應該是 $GA（deployments 的 tokenOwner）；admin 直接 mint 會回 OwnableUnauthorizedAccount
 cast call $TOKEN "version()(string)"   # v2 才有，v1 會 revert
 cast call $TOKEN "balanceOf(address)(uint256)" $H1
 ```

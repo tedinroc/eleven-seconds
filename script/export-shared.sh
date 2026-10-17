@@ -34,5 +34,7 @@ rule() { # <rule> <zh label> <threat>
   rule R6_SIM_FAILURE "模拟失败或超时（fail-closed）" "T8"
   rule R7_CONFIG_GUARD "未经核准的守护配置变更" "T4/T5"
   rule R8_INIT_DATA "升级附带未核准的初始化数据" "T9"
+  rule R3B_THIRD_PARTY_FUNDS "陌生地址能动用别人的余额（未授权 transferFrom 或余额被改）" "T3"
+  rule R9_NEW_OPCODES "新合约出现了时间/外部调用类危险指令（定时炸弹嫌疑）" "timebomb"
 } | jq -s '{v: 1, hash: "keccak256(utf8(id))", rules: .}' > shared/rules.json
 echo "shared/rules.json"

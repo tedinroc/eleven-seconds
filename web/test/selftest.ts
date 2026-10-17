@@ -6,6 +6,7 @@ import { blockFontPx, explorerUrl, fmtGwei, fmtMon, plausibleBlockMs, reportAuto
 import { playFake, startFake } from '../src/fake'
 import { SENTINELS } from '../src/runtime'
 import { store, type Proposal } from '../src/store'
+import { RULE_TEXT } from '../src/types'
 
 let fails = 0
 function ok(cond: unknown, msg: string) {
@@ -96,6 +97,26 @@ const id2 = store.activeId!
 ok(id2 !== id1, '第二张卡成为当前提案')
 ok(await until(() => SENTINELS.every((s) => store.proposals.get(id2)!.sentinels[s]?.verdict === 'pass'), 6000), '假事件：v2 三个哨兵放行')
 ok(vetoMetrics(store.proposals.get(id2)!, SENTINELS) === null, '放行不产生否决数字')
+
+// ---------- 3. 新规则与未知事件类型 ----------
+ok(RULE_TEXT.R3B_THIRD_PARTY_FUNDS?.length > 0 && RULE_TEXT.R9_NEW_OPCODES?.length > 0, '新规则 R3B／R9 有中文说明')
+{
+  const n0 = store.stream.length
+  let threw = false
+  try {
+    store.ingest({ v: 1, type: 'veto_failed', ts: Date.now(), mode: 'testnet', source: 'sentinel-2', id: id1, error: 'nonce too low', txHash: TX })
+    store.ingest({ v: 1, type: 'totally_new_type', ts: Date.now() + 1, mode: 'testnet', source: 'sentinel-3' } as never)
+    store.ingest({ v: 1, type: 'veto_failed', ts: Date.now() + 2, mode: 'testnet', source: 'sentinel-2', id: 'no-such-proposal', extra: { x: 1 } })
+  } catch {
+    threw = true
+  }
+  ok(!threw, '未知事件类型不会让页面出错')
+  const tail = store.stream.slice(n0)
+  ok(tail.some((l) => l.type === 'veto_failed' && l.text.includes('否决交易失败') && l.text.includes('nonce too low')), 'veto_failed 出现在事件串流（含错误讯息）')
+  ok(tail.some((l) => l.type === 'totally_new_type' && l.text.includes('未知事件')), '没有 id 的未知事件也列进事件串流')
+  ok(tail.filter((l) => l.type === 'veto_failed').length === 2, '同类未知事件不会被去重吞掉')
+  ok(store.proposals.get(id1)!.sentinels['sentinel-2']?.receipt !== undefined, '未知事件不改动提案状态')
+}
 
 console.log(fails ? `\n${fails} 项失败` : '\n全部通过')
 process.exit(fails ? 1 : 0)

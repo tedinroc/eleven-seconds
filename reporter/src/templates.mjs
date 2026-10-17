@@ -43,6 +43,25 @@ const T = {
       `建议多签维持否决，要求提供源码并逐行审计转账逻辑。`
     );
   },
+  R3B_THIRD_PARTY_FUNDS: (f) => {
+    const c = pick(f, /^R3B_/) ?? f.failed[0];
+    const who = f.thirdPartyText ? `（被改动：${f.thirdPartyText}）` : '';
+    const sel = f.culpritText ? `，相关函数选择器 ${f.culpritText}` : '';
+    return (
+      `${head(f)}被哨兵否决：${c ? c.sentence : '陌生地址的调用改变了别人的余额'}${who}${sel}。` +
+      `这说明任何人都可能不经授权挪走持有人的 ${f.symbol}，属于盗用第三方资金型漏洞。` +
+      `建议多签维持否决、不要执行，要求提供源码并审计 transferFrom 与授权逻辑。`
+    );
+  },
+  R9_NEW_OPCODES: (f) => {
+    const n = f.opcodesAdded.length;
+    const what = n ? `新实现比旧实现多了 ${n} 个危险操作码（${f.opcodesText}）` : '新实现包含旧实现没有的危险操作码';
+    return (
+      `${head(f)}被哨兵否决：${what}。` +
+      `读取区块时间、区块号、tx.origin，或外部调用、自毁这类操作码，能让合约在模拟之后才改变行为（例如到某个区块才触发的定时炸弹），单靠模拟无法排除。` +
+      `建议多签维持否决，要求说明每个新操作码的用途，经 approver 核准 codehash 后再提案。`
+    );
+  },
   R4_TRANSFER_LIVENESS: (f) => {
     const why = f.errorText ? `（${f.errorText}）` : '';
     return (

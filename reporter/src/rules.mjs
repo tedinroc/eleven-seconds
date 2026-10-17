@@ -13,6 +13,8 @@ export const RULE_IDS = [
   'R6_SIM_FAILURE',
   'R7_CONFIG_GUARD',
   'R8_INIT_DATA',
+  'R3B_THIRD_PARTY_FUNDS',
+  'R9_NEW_OPCODES',
 ];
 
 export const RULE_LABELS = {
@@ -24,6 +26,8 @@ export const RULE_LABELS = {
   R6_SIM_FAILURE: '模拟失败即否决',
   R7_CONFIG_GUARD: '配置变更需核准',
   R8_INIT_DATA: '初始化数据需核准',
+  R3B_THIRD_PARTY_FUNDS: '陌生地址不能动别人的余额',
+  R9_NEW_OPCODES: '不得新增危险操作码',
   pass: '全部检查通过',
 };
 
@@ -65,15 +69,25 @@ export function loadRules(rulesPath) {
   return { byId, byHash };
 }
 
-/** "GUARD/R3_TRANSFER_CONSERVATION" | "R3" | "r3_transfer..." -> "R3_TRANSFER_CONSERVATION"; pass -> "pass". */
+/**
+ * "GUARD/R3_TRANSFER_CONSERVATION" | "R3" | "r3_transfer" -> "R3_TRANSFER_CONSERVATION"; pass -> "pass".
+ * "R3B_THIRD_PARTY_FUNDS" | "R3B" -> "R3B_THIRD_PARTY_FUNDS" (never folded into R3).
+ * An ID whose prefix exists but whose name does not match (e.g. "R9_SOMETHING_NEW") -> null,
+ * so an unknown rule gets the generic template instead of another rule's explanation.
+ */
 export function normalizeRuleId(x) {
   if (x == null) return null;
   const s = String(x).trim();
   if (!s) return null;
   if (/^(pass|none|ok)$/i.test(s)) return 'pass';
-  const m = s.replace(/^GUARD\//i, '').match(/^R(\d)/i);
+  const body = s.replace(/^GUARD\//i, '').toUpperCase();
+  const exact = RULE_IDS.find((id) => id === body);
+  if (exact) return exact;
+  const m = body.match(/^(R\d+[A-Z]?)(?:_(.*))?$/);
   if (!m) return null;
-  return RULE_IDS.find((id) => id.startsWith(`R${m[1]}_`)) ?? null;
+  const cands = RULE_IDS.filter((id) => id.startsWith(`${m[1]}_`));
+  if (!m[2]) return cands[0] ?? null;
+  return cands.find((id) => id.slice(m[1].length + 1).startsWith(m[2])) ?? null;
 }
 
 /** Proposal kind (number | "0" | "Upgrade") -> 0..3, or null. */

@@ -57,6 +57,20 @@
       "ruleHash": "0x13457d3e5c6ea2bc05b029a6ab36c2e1adec22a31346274ab767acfe08f9e049",
       "zh": "升级附带未核准的初始化数据",
       "threat": "T9"
+    },
+    {
+      "rule": "R3B_THIRD_PARTY_FUNDS",
+      "id": "GUARD/R3B_THIRD_PARTY_FUNDS",
+      "ruleHash": "0x454b6e9715bb51ee6eac05039a10eeb399b083f27a4f7c6f9d889756dfa3e214",
+      "zh": "陌生地址能动用别人的余额（未授权 transferFrom 或余额被改）",
+      "threat": "T3"
+    },
+    {
+      "rule": "R9_NEW_OPCODES",
+      "id": "GUARD/R9_NEW_OPCODES",
+      "ruleHash": "0x766e11dc2c5f99690e801f33107e733cccfe7ba712f5a72ab95d4020fbeb2b87",
+      "zh": "新合约出现了时间/外部调用类危险指令（定时炸弹嫌疑）",
+      "threat": "timebomb"
     }
   ]
 }

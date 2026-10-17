@@ -1,9 +1,31 @@
 // Local SSE + control server (spec 4.1): GET /events, GET /health, POST /attach.
 // Binds to 127.0.0.1 only. Every event is one JSON line with the common fields of spec 4.4.
+// /attach spends the guardian's gas, so it is not a CORS endpoint: no Access-Control-Allow-Origin,
+// content-type must be application/json (a cross-site "simple request" cannot send that without a
+// preflight, and the preflight gets no CORS headers), and when ATTACH_SECRET is set the request
+// must carry it in the X-Attach-Secret header. Without a secret only loopback peers are accepted.
 import http from 'node:http'
+import { timingSafeEqual, createHash } from 'node:crypto'
 import { toJson } from './util.mjs'
 
-export function createEventServer({ port, host = '127.0.0.1', source, mode, health, onAttach, routes = {}, backlogSize = 200, log }) {
+export const ATTACH_SECRET_HEADER = 'x-attach-secret'
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
+const digest = (s) => createHash('sha256').update(String(s)).digest()
+
+/** Gate for POST /attach. Returns null when allowed, else { code, error }. */
+export function checkAttachRequest(req, attachSecret) {
+  const ct = String(req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase()
+  if (ct !== 'application/json') return { code: 415, error: 'content-type must be application/json' }
+  if (attachSecret) {
+    const got = req.headers[ATTACH_SECRET_HEADER]
+    if (typeof got !== 'string' || !timingSafeEqual(digest(got), digest(attachSecret))) return { code: 401, error: 'missing or wrong X-Attach-Secret' }
+  } else if (!LOOPBACK.has(req.socket?.remoteAddress)) {
+    return { code: 403, error: 'attach only from 127.0.0.1 when ATTACH_SECRET is not set' }
+  }
+  return null
+}
+
+export function createEventServer({ port, host = '127.0.0.1', source, mode, health, onAttach, attachSecret = null, routes = {}, backlogSize = 200, log }) {
   const clients = new Set()
   const backlog = []
 
@@ -21,8 +43,8 @@ export function createEventServer({ port, host = '127.0.0.1', source, mode, heal
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'content-type',
   }
-  const sendJson = (res, code, body) => {
-    res.writeHead(code, { 'content-type': 'application/json', ...cors })
+  const sendJson = (res, code, body, headers = cors) => {
+    res.writeHead(code, { 'content-type': 'application/json', ...headers })
     res.end(toJson(body))
   }
   const readBody = (req) =>
@@ -45,7 +67,7 @@ export function createEventServer({ port, host = '127.0.0.1', source, mode, heal
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost')
     if (req.method === 'OPTIONS') {
-      res.writeHead(204, cors)
+      res.writeHead(204, url.pathname === '/attach' ? {} : cors) // no CORS preflight approval for /attach
       return res.end()
     }
     try {
@@ -61,10 +83,16 @@ export function createEventServer({ port, host = '127.0.0.1', source, mode, heal
       }
       if (req.method === 'GET' && url.pathname === '/health') return sendJson(res, 200, health ? health() : { ok: true, source })
       if (req.method === 'POST' && url.pathname === '/attach') {
-        if (!onAttach) return sendJson(res, 404, { ok: false, error: 'attach not enabled on this sentinel' })
+        if (!onAttach) return sendJson(res, 404, { ok: false, error: 'attach not enabled on this sentinel' }, {})
+        const denied = checkAttachRequest(req, attachSecret)
+        if (denied) {
+          req.resume()
+          log?.warn?.(`attach refused (${denied.code}): ${denied.error}`)
+          return sendJson(res, denied.code, { ok: false, error: denied.error }, {})
+        }
         const body = await readBody(req)
         const out = await onAttach(body)
-        return sendJson(res, out.ok ? 200 : 400, out)
+        return sendJson(res, out.ok ? 200 : 400, out, {})
       }
       const key = `${req.method} ${url.pathname}`
       if (routes[key]) {
@@ -74,7 +102,7 @@ export function createEventServer({ port, host = '127.0.0.1', source, mode, heal
       sendJson(res, 404, { ok: false, error: 'not found' })
     } catch (e) {
       log?.warn?.(`http ${req.method} ${url.pathname}: ${e.message}`)
-      if (!res.headersSent) sendJson(res, 500, { ok: false, error: e.message })
+      if (!res.headersSent) sendJson(res, 500, { ok: false, error: e.message }, url.pathname === '/attach' ? {} : cors)
     }
   })
 
@@ -86,6 +114,7 @@ export function createEventServer({ port, host = '127.0.0.1', source, mode, heal
   return {
     emit,
     clients,
+    address: () => server.address(),
     listen: () => new Promise((resolve, reject) => {
       server.once('error', reject)
       server.listen(port, host, () => resolve())

@@ -1,7 +1,7 @@
 # 十一秒 Eleven Seconds
 
 > 给合约升级装一个 30 个区块的冷静期：升级生效前，3 个独立哨兵先在模拟器里把新合约当攻击者打一遍，违反不变量就链上否决。
-> Monad 测试网实测：恶意升级提案后第 9 个区块否决就落地（攻击者还要等 21 个区块），execute 回 `ProposalVetoed`；正常升级 30 个区块后照常生效。
+> Monad 测试网实测：恶意升级提案后 4–7 个区块否决就落地（最快 1.25 秒，攻击者还要等 23–26 个区块），execute 回 `ProposalVetoed`；正常升级 30 个区块后照常生效。
 
 **Eleven Seconds puts a 30-block cooldown in front of every contract upgrade, and uses that window to
 attack-test the new implementation in a simulator before it can go live.** If a stranger can mint,
@@ -29,18 +29,8 @@ upgrade right on a single key. And a timelock only makes you wait. It does not c
    `stateOverride` that swaps the proxy's ERC-1967 implementation slot to the new code, then runs
    baseline reads, a normal holder transfer, every selector found in the new bytecode called from a
    fresh stranger address with several argument sets, and the reads again.
-3. **Judge by invariants**, not by reading source code (sentinels only need bytecode):
-
-   | Rule | Invariant |
-   | --- | --- |
-   | R1 | a stranger's call cannot change `totalSupply` |
-   | R2 | a stranger's call cannot change `owner()` |
-   | R3 | a transfer of X moves exactly X; nobody else's balance changes |
-   | R4 | a normal transfer still succeeds (no bricking upgrade) |
-   | R5 | strict mode: the codehash must be pre-approved by a second key |
-   | R6 | simulation failed on both providers or timed out: fail closed |
-   | R7 | removing a guardian, shortening the delay, or replacing the pause implementation needs approval |
-   | R8 | an upgrade with init data needs an approved codehash |
+3. **Judge by invariants**, not by reading source code (sentinels only need bytecode). The rules
+   R1–R9 are listed under [Security model](#security-model).
 
 4. **Veto.** Any violation, and the sentinel broadcasts a pre-sized `veto(id, ruleHash)` on three RPCs
    (local nonce, fixed gas limit, no gas estimation). `execute()` after the window reverts with
@@ -59,7 +49,7 @@ to a pre-registered paused implementation immediately.
   owner key (assume leaked)                     approver key (strict mode)
         | proposeUpgrade(newImpl, data)                | approveCodehash(hash)
         v                                              v
- +--------------------------- GuardedAdmin (owner of ProxyAdmin) ---------------------------+
+ +--------------------- GuardedAdmin (owner of ProxyAdmin and of dBTC) ---------------------+
  |  Proposed --> 30-block cooldown --> execute() --> ProxyAdmin.upgradeAndCall(proxy, impl)  |
  |     ^  veto(id, ruleHash) from any guardian          breakGlass() --> PausedImpl          |
  +-----|------------------------------------------------------------------------------------+
@@ -68,12 +58,46 @@ to a pre-registered paused implementation immediately.
  | sentinel-1 |   | sentinel-2 |   | sentinel-3 |   independent processes, own key, own RPCs
  +-----+------+   +------------+   +------------+   SSE on :8701-8703
        |  eth_simulateV1 + stateOverride (impl slot -> newImpl)
-       |  baseline reads -> holder transfer -> stranger probes -> reads -> rules R1-R8
+       |  baseline reads -> holder transfer -> stranger probes -> reads -> rules R1-R9
        v
  reporter :8710   local Qwen (LM Studio) or rule template -> Chinese note -> attachReason(id, hash)
  driver   :8700   sends demo proposals, auto-executes when ready, reads version()
  web      :5173   war room: block counter, attacker vs sentinels, veto stages, cost per veto
 ```
+
+## Security model
+
+**Attacker.** Holds the owner key of `GuardedAdmin` (the key that proposes upgrades; assume it is
+leaked), can deploy any bytecode without publishing source, and calls `execute` the moment a proposal
+is ready. The attacker does not hold the guardian keys or the approver key.
+
+**What we block.** Upgrades and changes to the guard itself wait 30 blocks. `GuardedAdmin` owns the
+`ProxyAdmin` and, since block 71726096, also the token's own `Ownable`
+([tx](https://testnet.monadexplorer.com/tx/0xc48a8d8229e33bf4e6f4aa7c71251a56b834aecd93f0b5ff61e7ea5f4b3497bb)),
+so the leaked key can neither upgrade nor `mint` directly (both revert with
+`OwnableUnauthorizedAccount`), and `GuardedAdmin` has no generic call path. During the cooldown any
+one sentinel can veto by these rules:
+
+| Rule | Invariant |
+| --- | --- |
+| R1 | a stranger's call cannot change `totalSupply` |
+| R2 | a stranger's call cannot change `owner()` |
+| R3 | a transfer of X moves exactly X; nobody else's balance changes |
+| R3B | a stranger cannot move anyone else's funds (`transferFrom` without allowance, or any probe) |
+| R4 | a normal transfer still succeeds (no bricking upgrade) |
+| R5 | strict mode: the codehash must be pre-approved by a second key |
+| R6 | simulation failed on both providers or timed out: fail closed |
+| R7 | removing a guardian, shortening the delay, or replacing the pause implementation needs approval |
+| R8 | an upgrade with init data needs an approved codehash |
+| R9 | the new code adds no dangerous opcode the current implementation lacks (block/tx context, external call, create, selfdestruct), unless its codehash is approved |
+
+**Next steps.**
+
+- Proposals do not expire and there is no `cancel`: a proposal that was not vetoed stays executable.
+- `breakGlass()` pauses the token but does not cancel upgrades already queued.
+- A backdoor that only opens for one hard-coded `msg.sender` looks clean to a stranger's simulation;
+  strict mode (R5) is the answer for that class.
+- Today the three sentinels are separate processes with separate keys, running on the same laptop.
 
 ## Why Monad
 
@@ -97,7 +121,7 @@ Verification is on the MonadVision Sourcify instance (`sourcify-api-monad.blockv
 | Contract | Address | Source |
 | --- | --- | --- |
 | GuardedAdmin | [`0x57a84DCaDB3C29aeF27Cd5d7f3A3Af2C27F25ef4`](https://testnet.monadexplorer.com/address/0x57a84DCaDB3C29aeF27Cd5d7f3A3Af2C27F25ef4) | Sourcify exact match |
-| DemoBTC proxy (dBTC) | [`0xE851E12bb9987F40A5f605eb0c8008Dce6eEB3A8`](https://testnet.monadexplorer.com/address/0xE851E12bb9987F40A5f605eb0c8008Dce6eEB3A8) | OpenZeppelin TransparentUpgradeableProxy, not submitted |
+| DemoBTC proxy (dBTC) | [`0xE851E12bb9987F40A5f605eb0c8008Dce6eEB3A8`](https://testnet.monadexplorer.com/address/0xE851E12bb9987F40A5f605eb0c8008Dce6eEB3A8) | OpenZeppelin TransparentUpgradeableProxy, not submitted; token owner = GuardedAdmin since block 71726096 (`tokenOwner` in the deployments file) |
 | ProxyAdmin | [`0x446d8bCD6365421fAf2BA00e1912A7A695E2caEf`](https://testnet.monadexplorer.com/address/0x446d8bCD6365421fAf2BA00e1912A7A695E2caEf) | created by the proxy, owner = GuardedAdmin |
 | DemoBTC v1 impl | [`0x05aB95D20800870939605Fb57fc12c09c2fC5547`](https://testnet.monadexplorer.com/address/0x05aB95D20800870939605Fb57fc12c09c2fC5547) | Sourcify exact match |
 | DemoBTC v2 impl | [`0xFb68bF421c64ef5efBa05B16B8a8C64a3b1fE5BA`](https://testnet.monadexplorer.com/address/0xFb68bF421c64ef5efBa05B16B8a8C64a3b1fE5BA) | Sourcify exact match |
@@ -112,7 +136,34 @@ the sentinels judge bytecode only. Guardians: `0x7ED9…EF3b`, `0xd662…6B68`, 
 
 ## Measured today on Monad testnet (venue network, 2026-10-17)
 
-**Malicious upgrade (EvilMint, proposal #1)**
+**Afternoon runs (proposals #3–#9)**
+
+| # | Card | Proposed at block | First veto landed | `proposal_seen` to veto receipt | Outcome |
+| --- | --- | --- | --- | --- | --- |
+| 3 | EvilMint | 71723855 | +5 blocks | 1768 ms | 3/3 veto |
+| 4 | EvilOwner | 71723873 | +5 blocks | 1740 ms | 3/3 veto |
+| 5 | EvilFee | 71723893 | +16 blocks (third veto +17) | 7.4 s | 3/3 veto |
+| 6 | EvilFee | 71724344 | +6 blocks | 1969 ms | 3/3 veto |
+| 7 | v2 | 71724368 | — | — | 3/3 pass; executed in block 71724402 after the 30-block cooldown ([tx](https://testnet.monadexplorer.com/tx/0x4b831ca82af42363bd56de34405a4d46ff87982c02c298d70af05430db9df121)) |
+| 8 | EvilFee | 71724394 | **+4 blocks** | **1314 ms** (fastest sentinel 1252 ms) | 3/3 veto |
+| 9 | EvilOwner | 71724850 | +6 blocks | — | 3/3 veto |
+
+Every vetoed proposal's `execute` reverts with `ProposalVetoed`. Typical result: the veto lands 4–7
+blocks after the proposal, leaving the attacker 23–26 blocks short of `readyBlock`.
+
+Proposal #8 (EvilFee, rule R3) on chain:
+
+| What | Transaction |
+| --- | --- |
+| Proposed, block 71724394 (ready at 71724424) | [`0x2b0585d04013a24d605461472a43dcb16afea520a9bea65f3d5be56415938a78`](https://testnet.monadexplorer.com/tx/0x2b0585d04013a24d605461472a43dcb16afea520a9bea65f3d5be56415938a78) |
+| First `Vetoed`, block 71724398 (all three vetoes in this block) | [`0x7a96dd70cfb0aadadcaa231ac5bb3b8d7fd4b8025df1ea107e10ab025593f290`](https://testnet.monadexplorer.com/tx/0x7a96dd70cfb0aadadcaa231ac5bb3b8d7fd4b8025df1ea107e10ab025593f290) |
+| `execute(8)`, block 71724427, reverted with `ProposalVetoed` | [`0x48ca61e05beee8ec16bab69f46738681159156d91a2adf3f0c7eb73c3a80160c`](https://testnet.monadexplorer.com/tx/0x48ca61e05beee8ec16bab69f46738681159156d91a2adf3f0c7eb73c3a80160c) |
+
+**Cost of one veto.** gas limit = gas used = 123,112 (Monad charges the gas limit). At 102 gwei that
+is ~0.01256 MON (proposals #1–#8); with the 10 gwei priority-fee floor added afterwards, 110 gwei,
+~0.01354 MON (from #9).
+
+**First round, cold connections (EvilMint, proposal #1)**
 
 | What | Result |
 | --- | --- |
@@ -121,7 +172,7 @@ the sentinels judge bytecode only. Guardians: `0x7ED9…EF3b`, `0xd662…6B68`, 
 | First veto landed | block 71719043 ([tx](https://testnet.monadexplorer.com/tx/0x165a1878e550b57ec85309313fe8841fc73de18dee48bc287b13f81773a318b9)): **9 blocks after the proposal, 21 blocks before the attacker could execute**; vetoes 2 and 3 in blocks 71719044 and 71719045 |
 | `proposal_seen` to veto receipt | 2681 ms (other two sentinels: 3060 ms, 3556 ms) |
 | Simulation time (`simMs`) | 2236 / 2573 / 2308 ms, of which the `eth_simulateV1` request itself was 1399 / 804 / 689 ms; most of the rest was cold connection setup |
-| Cost of one veto | gas limit = gas used = 123,112 (Monad charges the gas limit) at 102 gwei = **~0.0126 MON** |
+| Cost of one veto | 123,112 gas at 102 gwei = ~0.0126 MON |
 | Attacker's `execute(1)` | block 71719073, reverted with `ProposalVetoed` ([tx](https://testnet.monadexplorer.com/tx/0x21fe66f76256e6a385de8bcf113bf252ff907d0fa186893b0634933ac5def169)) |
 | Risk note hash on chain | `attachReason` in block 71719050 ([tx](https://testnet.monadexplorer.com/tx/0x703284958ce96e1cf078e4d80b049717982bcb59364974cad212badf41c25211)) |
 
@@ -187,7 +238,7 @@ node sentinel/fake-events.mjs                       # fake sentinel SSE (FAKE_DR
 ### Tests
 
 ```bash
-forge test                                          # 30 GuardedAdmin tests (cooldown, veto, guard self-locking, breakGlass)
+forge test                                          # 33 GuardedAdmin tests (cooldown, veto, guard self-locking, breakGlass, token ownership)
 node --test sentinel/test/unit.test.mjs             # offline sentinel unit tests
 (cd reporter && npm test)                           # fake sentinels + fake LLM, no chain
 ROUNDS=5 node sentinel/test/e2e-anvil.mjs           # needs anvil + deploy + 3 running sentinels
@@ -202,7 +253,7 @@ ROUNDS=5 node sentinel/test/e2e-anvil.mjs           # needs anvil + deploy + 3 r
 | `src/attack/` | EvilMintImpl (R1), EvilOwnerImpl (R2), EvilFeeImpl (R3): demo attack code |
 | `test/GuardedAdmin.t.sol` | Foundry tests |
 | `script/` | `Deploy.s.sol` + `deploy.sh` (one-shot deploy), `measure-gas.sh`, `export-shared.sh` |
-| `sentinel/` | sentinel process: detection, merged simulation, rules R1–R8, veto signer, SSE ([NOTES](sentinel/NOTES.md)) |
+| `sentinel/` | sentinel process: detection, merged simulation, rules R1–R9, veto signer, SSE ([NOTES](sentinel/NOTES.md)) |
 | `reporter/` | risk-note writer: local LLM with template fallback, hash attached on chain ([README](reporter/README.md)) |
 | `driver/` | demo driver for the war room: propose cards, auto-execute, approve codehash |
 | `web/` | war room frontend (Vite + TypeScript + viem) |

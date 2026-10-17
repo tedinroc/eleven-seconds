@@ -70,9 +70,13 @@ contract GuardedAdminTest is Test {
         ga = new GuardedAdmin(address(proxyAdmin), proxy, admin, _guardians(), approver, address(pausedImpl), DELAY);
         vm.stopPrank();
 
-        vm.prank(admin);
-        proxyAdmin.transferOwnership(address(ga));
+        // Adoption, exactly as script/Deploy.s.sol: admin hands both ProxyAdmin and the token's Ownable
+        // to GuardedAdmin.
         token = DemoBTC(proxy);
+        vm.startPrank(admin);
+        proxyAdmin.transferOwnership(address(ga));
+        token.transferOwnership(address(ga));
+        vm.stopPrank();
     }
 
     // ------------------------------------------------------------------ helpers
@@ -119,6 +123,7 @@ contract GuardedAdminTest is Test {
         assertEq(_impl(), address(v1));
         assertEq(token.symbol(), "dBTC");
         assertEq(token.balanceOf(h1), 100e8);
+        assertEq(token.owner(), address(ga));
     }
 
     function test_T6_adminCannotBypassGuardedAdmin() public {
@@ -127,6 +132,33 @@ contract GuardedAdminTest is Test {
         proxyAdmin.upgradeAndCall(ITransparentUpgradeableProxy(proxy), address(evilMint), "");
         assertEq(_impl(), address(v1));
         assertTrue(ga.isWired());
+    }
+
+    /// A leaked admin key must not be able to mint (or grab the token) without going through a
+    /// proposal: the token's Ownable belongs to GuardedAdmin after adoption.
+    function test_T6_adminCannotMintDirectly() public {
+        uint256 sup = token.totalSupply();
+        vm.startPrank(admin);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, admin));
+        token.mint(admin, 1_000_000e8);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, admin));
+        token.transferOwnership(admin);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, admin));
+        token.renounceOwnership();
+        vm.stopPrank();
+        assertEq(token.totalSupply(), sup);
+        assertEq(token.owner(), address(ga));
+    }
+
+    /// GuardedAdmin owns the token but has no generic call path, so nobody can reach mint through it.
+    function test_T6_tokenOwnerIsGuardedAdmin_noOneMints() public {
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
+        token.mint(stranger, 1);
+        vm.prank(s1);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, s1));
+        token.mint(s1, 1);
+        assertEq(token.totalSupply(), 175e8);
     }
 
     // ------------------------------------------------------------------ T1: EvilMint vetoed
@@ -177,7 +209,7 @@ contract GuardedAdminTest is Test {
         assertEq(token.balanceOf(h1), bal1);
         assertEq(token.balanceOf(h2), bal2);
         assertEq(token.balanceOf(h3), bal3);
-        assertEq(token.owner(), admin);
+        assertEq(token.owner(), address(ga));
         assertEq(uint8(_status(id)), uint8(GuardedAdmin.Status.Executed));
 
         vm.expectRevert(abi.encodeWithSelector(GuardedAdmin.AlreadyExecuted.selector, id));
@@ -317,13 +349,13 @@ contract GuardedAdminTest is Test {
         // views still work, transfers and mints revert
         assertEq(token.balanceOf(h1), 100e8);
         assertEq(token.totalSupply(), 175e8);
-        assertEq(token.owner(), admin);
+        assertEq(token.owner(), address(ga));
         vm.prank(h1);
         vm.expectRevert(PausedImpl.TokenPaused.selector);
         token.transfer(h2, 1);
-        vm.prank(admin);
+        vm.prank(address(ga)); // even the token owner cannot mint while paused
         vm.expectRevert(PausedImpl.TokenPaused.selector);
-        token.mint(admin, 1);
+        token.mint(address(ga), 1);
 
         vm.prank(admin);
         vm.expectRevert(GuardedAdmin.AlreadyPaused.selector);
@@ -498,13 +530,48 @@ contract GuardedAdminTest is Test {
     function test_attack_evilFee_transferNotConserved() public {
         _overrideImpl(address(evilFee));
         uint256 sup = token.totalSupply();
-        uint256 ownerBefore = token.balanceOf(admin);
+        uint256 ownerBefore = token.balanceOf(address(ga));
         vm.prank(h1);
         token.transfer(stranger, 10e8);
         assertEq(token.balanceOf(h1), 90e8); // holder lost X
         assertEq(token.balanceOf(stranger), 9e8); // receiver got only 0.9 X
-        assertEq(token.balanceOf(admin), ownerBefore + 1e8); // 10% skimmed to owner()
+        // 10% skimmed to owner(), which is now GuardedAdmin: the R3 invariant (receiver +X, everyone
+        // else on the watchlist unchanged) is still violated, so the sentinels still veto.
+        assertEq(token.balanceOf(address(ga)), ownerBefore + 1e8);
+        assertEq(token.balanceOf(admin), 0);
         assertEq(token.totalSupply(), sup);
+    }
+
+    /// R3 scenario end to end with GuardedAdmin owning the token: the EvilFee skim lands in GuardedAdmin
+    /// (stuck there, no call path), the transfer is still not conserved for a fresh receiver, and the
+    /// R3 veto keeps the proposal from ever executing.
+    function test_T3_evilFee_skimToGuardedAdmin_R3StillHolds_andVetoed() public {
+        address receiver = makeAddr("freshReceiver");
+        uint256 x = 10e8;
+        uint256 snap = vm.snapshotState();
+        _overrideImpl(address(evilFee)); // what the sentinels' stateOverride sees
+        uint256 h1Before = token.balanceOf(h1);
+        uint256 gaBefore = token.balanceOf(address(ga));
+        vm.prank(h1);
+        token.transfer(receiver, x);
+        int256 dHolder = int256(token.balanceOf(h1)) - int256(h1Before);
+        int256 dReceiver = int256(token.balanceOf(receiver));
+        int256 dOwner = int256(token.balanceOf(address(ga))) - int256(gaBefore);
+        assertEq(dHolder, -int256(x));
+        assertTrue(dReceiver != int256(x)); // R3 violated
+        assertEq(dOwner, int256(x / 10)); // skimmedTo = GuardedAdmin
+        vm.revertToState(snap);
+
+        uint256 id = _proposeUpgrade(address(evilFee));
+        vm.prank(s2);
+        ga.veto(id, R3);
+        _advance(DELAY);
+        vm.expectRevert(abi.encodeWithSelector(GuardedAdmin.ProposalVetoed.selector, id));
+        ga.execute(id);
+        assertEq(_impl(), address(v1));
+        vm.prank(h1);
+        token.transfer(receiver, x);
+        assertEq(token.balanceOf(receiver), x); // v1 still conserves
     }
 
     function test_attack_selectorsUnchanged() public view {

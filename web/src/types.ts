@@ -39,7 +39,8 @@ export interface Check {
 
 export interface WarEvent {
   v: 1
-  type: EventType
+  // 未知类型（例如 veto_failed）也可能出现：只进事件串流，不进状态机
+  type: EventType | (string & {})
   ts: number
   mode: 'testnet' | 'replay'
   source: string
@@ -104,6 +105,17 @@ export const RULE_TEXT: Record<string, string> = {
   R6_SIM_FAILURE: '模拟失败或超时，fail-closed 否决',
   R7_CONFIG_GUARD: '未经核准的配置变更',
   R8_INIT_DATA: '升级夹带未核准的初始化数据',
+  R3B_THIRD_PARTY_FUNDS: '陌生地址的调用动了别人的余额（挪用第三方资金）',
+  R9_NEW_OPCODES: '新实现多了旧版没有的危险 opcode（定时炸弹风险）',
+}
+
+// 事件串流里新增（或未来新增）的事件类型：只显示，不影响任何状态。
+export const EXTRA_EVENT_TEXT: Record<string, string> = {
+  veto_failed: '否决交易失败',
+}
+
+export function isKnownEventType(t: string): t is EventType {
+  return (EVENT_TYPES as string[]).includes(t)
 }
 
 export const KIND_TEXT: Record<string, string> = {

@@ -44,5 +44,7 @@
     "decimals": 8,
     "name": "DemoBTC",
     "symbol": "dBTC"
-  }
+  },
+  "tokenOwner": "0x57a84DCaDB3C29aeF27Cd5d7f3A3Af2C27F25ef4",
+  "tokenOwnerTx": "0xc48a8d8229e33bf4e6f4aa7c71251a56b834aecd93f0b5ff61e7ea5f4b3497bb"
 }
