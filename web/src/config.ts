@@ -20,6 +20,10 @@ export interface ChainConfig {
   headsMethod: 'monadNewHeads' | 'newHeads'
   /** 交易浏览器前缀；本机没有 */
   explorerTx: string | null
+  /** 地址浏览器前缀；本机没有 */
+  explorerAddr: string | null
+  /** Sourcify 查验 API 前缀（GET <prefix><address> → { match }）；本机没有 */
+  sourcifyApi: string | null
 }
 
 export type ServiceName = 'sentinel-1' | 'sentinel-2' | 'sentinel-3' | 'driver' | 'reporter'
@@ -32,9 +36,13 @@ export const CONFIG = {
       chainId: 10143,
       badge: 'Monad 测试网 10143',
       ws: ['wss://testnet-rpc.monad.xyz', 'wss://rpc-testnet.monadinfra.com'],
-      http: ['https://rpc-testnet.monadinfra.com', 'https://rpc.ankr.com/monad_testnet'],
+      // ankr 放第一：2026-10-17 会场网路实测 monadinfra 读取常回 HTTP request failed（两家都在 spec 4.2.3 的 getLogs/心跳名单内）
+      http: ['https://rpc.ankr.com/monad_testnet', 'https://rpc-testnet.monadinfra.com'],
       headsMethod: 'monadNewHeads',
-      explorerTx: 'https://testnet.monadvision.com/tx/',
+      explorerTx: 'https://testnet.monadexplorer.com/tx/',
+      explorerAddr: 'https://testnet.monadexplorer.com/address/',
+      // Monad 测试网的 Sourcify 实例（部署脚本的 VERIFIER_URL 同一家）；浏览器端只读 GET，允许 CORS
+      sourcifyApi: 'https://sourcify-api-monad.blockvision.org/v2/contract/10143/',
     } satisfies ChainConfig,
     replay: {
       chainId: 31337,
@@ -43,6 +51,8 @@ export const CONFIG = {
       http: ['http://127.0.0.1:{anvil}'],
       headsMethod: 'newHeads',
       explorerTx: null,
+      explorerAddr: null,
+      sourcifyApi: null,
     } satisfies ChainConfig,
   },
   defaultAnvilPort: 8545,
@@ -74,5 +84,10 @@ export const CONFIG = {
     { name: '以太坊', blockSec: 12, note: '约 12 秒/块' },
     { name: 'BSC', blockSec: 0.45, note: '约 0.45 秒/块' },
   ],
+  /** 只在 driver /deployments 拿不到时才用；画面优先用部署档里的 delayBlocks */
   delayBlocks: 30,
+  /** AI 报告完成后几毫秒自动收起（R 键可再打开） */
+  reportAutoCloseMs: 8000,
+  /** 出块时间低于这个值视为 anvil 快进挖块，不当成实测秒/块 */
+  minPlausibleBlockMs: 50,
 }

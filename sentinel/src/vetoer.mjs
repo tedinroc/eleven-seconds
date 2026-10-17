@@ -6,7 +6,7 @@
 //  - the same raw tx broadcast to every RPC at once: the first with eth_sendRawTransactionSync,
 //    the rest with eth_sendRawTransaction; "already known" / "nonce too low" count as delivered.
 import { encodeFunctionData, keccak256 } from 'viem'
-import { RpcError } from './rpc.mjs'
+import { RpcError, isRetryable } from './rpc.mjs'
 import { sleep } from './util.mjs'
 
 const BENIGN = /already known|known transaction|nonce too low|already imported|replacement transaction underpriced|transaction already exists/i
@@ -42,7 +42,10 @@ export class Vetoer {
       this.mainRpc.call('eth_getBlockByNumber', ['latest', false]),
     ])
     const base = block?.baseFeePerGas ? BigInt(block.baseFeePerGas) : gasPrice
-    const priority = tip ?? (gasPrice > base ? gasPrice - base : 0n)
+    // Floor the tip so a veto is not queued behind cheaper traffic (VETO_MIN_PRIORITY_GWEI, default 10).
+    const minTip = BigInt(Math.round(Number(process.env.VETO_MIN_PRIORITY_GWEI ?? '10') * 1e9))
+    let priority = tip ?? (gasPrice > base ? gasPrice - base : 0n)
+    if (priority < minTip) priority = minTip
     let maxFee = base * 2n + priority
     if (maxFee < gasPrice) maxFee = gasPrice
     const changed = !this.fee || this.fee.maxFeePerGas !== maxFee || this.fee.maxPriorityFeePerGas !== priority
@@ -101,6 +104,12 @@ export class Vetoer {
       if (this.dryRun) return { txHash: tx.hash, rpcs: [], dryRun: true, receipt: Promise.resolve(null) }
       onBroadcast?.({ txHash: tx.hash, rpcs: this.broadcastRpcs.map((r) => r.label) })
       let out = await this.broadcast(tx.raw)
+      if (!out.delivered && out.transportOnly) {
+        // Every RPC failed on the transport (tls eof, reset, 429...): resend the same raw tx once
+        // right away; the sockets that failed are gone, so this goes out on fresh connections.
+        this.log.warn(`broadcast: all RPCs failed on transport (${out.errors.join(' | ').slice(0, 200)}), resending once`)
+        out = await this.broadcast(tx.raw)
+      }
       if (!out.delivered && out.nonceError) {
         await this.resyncNonce()
         tx = await this.sign(functionName, args, this.nonce)
@@ -149,7 +158,7 @@ export class Vetoer {
           resolve(true)
         }).catch((e) => {
           const benign = BENIGN.test(e.message) && !/nonce too low/i.test(e.message) ? true : false
-          settled[k] = { ok: benign, label: rpcs[k].label, error: e.message, nonce: NONCE_ERR.test(e.message) }
+          settled[k] = { ok: benign, label: rpcs[k].label, error: e.message, nonce: NONCE_ERR.test(e.message), transport: isRetryable(e) }
           if (benign) resolve(true)
         }).finally(() => {
           if (--pending === 0) resolve(settled.some((s) => s?.ok))
@@ -159,7 +168,8 @@ export class Vetoer {
     const errors = settled.filter((s) => s && !s.ok).map((s) => `${s.label}: ${s.error}`)
     // "nonce too low" on every RPC means our local nonce is stale (or another RPC already has it).
     const nonceError = !delivered && settled.filter(Boolean).every((s) => s.nonce)
-    return { delivered, nonceError, errors, rpcs: rpcs.map((r) => r.label), syncReceipt: () => syncReceipt }
+    const transportOnly = !delivered && settled.filter(Boolean).length > 0 && settled.filter(Boolean).every((s) => s.transport && !s.nonce)
+    return { delivered, nonceError, transportOnly, errors, rpcs: rpcs.map((r) => r.label), syncReceipt: () => syncReceipt }
   }
 
   async waitReceipt(hash, syncReceipt) {

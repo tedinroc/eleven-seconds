@@ -44,6 +44,8 @@ function tick() {
 
 export function startFake() {
   blocks.setFake()
+  // 假部署资讯：画面版位与测试网一致（地址是编的，不连浏览器、不查 Sourcify）
+  store.deploy = { guardedAdmin: hex('fake-guarded-admin', 20), delayBlocks: 30, chainId: 10143 }
   timers.push(window.setInterval(tick, BLOCK_MS))
   for (const [i, s] of [...SENTINELS, 'driver', 'reporter'].entries()) {
     timers.push(
@@ -150,10 +152,12 @@ export function playFake(card: CardId) {
               txHash,
               block: vetoBlock,
               status: 'success',
-              gasUsed: 48211,
-              gasLimit: 53032,
+              // gas 数字照 2026-10-17 测试网实测（gasLimit＝gasUsed＝123112、102 gwei），仍标「假数据」
+              gasUsed: 123112,
+              gasLimit: 123112,
               effectiveGasPrice: '102000000000',
               latencyMs: Math.round(performance.now() - t0 - d),
+              extra: { vetoBlocksAfterPropose: vetoBlock - proposeBlock, blocksLeftForAttacker: readyBlock - vetoBlock },
             })
             atBlock(vetoBlock + 2, () => send('veto_finalized', s, { id, txHash, block: vetoBlock }))
           }),

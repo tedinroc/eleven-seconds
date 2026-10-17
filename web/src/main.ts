@@ -1,6 +1,7 @@
 import './style.css'
 import { blocks } from './chain'
 import { playFake, startFake, toggleFakeOffline } from './fake'
+import { checkVerified, fillProposeTx } from './lookup'
 import { MODE } from './runtime'
 import { connectServices, getDriver, postDriver } from './sse'
 import { store } from './store'
@@ -18,6 +19,13 @@ blocks.onChange(mark)
 function loop() {
   if (dirty) {
     dirty = false
+    if (MODE !== 'fake') {
+      // 只读补查：缺提案交易哈希就查 Proposed log；合约地址查 Sourcify（测试网才有）
+      fillProposeTx()
+      checkVerified(store.deploy?.guardedAdmin)
+      const t = store.active?.target
+      if (t) checkVerified(t)
+    }
     render()
   }
   requestAnimationFrame(loop)
@@ -38,7 +46,13 @@ if (MODE === 'fake') {
 async function loadDeployments() {
   for (;;) {
     try {
-      const d = await getDriver<{ impls?: Record<string, string> }>('/deployments')
+      const d = await getDriver<{ impls?: Record<string, string>; guardedAdmin?: string; proxy?: string; delayBlocks?: number; chainId?: number }>('/deployments')
+      store.deploy = {
+        guardedAdmin: typeof d.guardedAdmin === 'string' ? d.guardedAdmin : undefined,
+        proxy: typeof d.proxy === 'string' ? d.proxy : undefined,
+        delayBlocks: typeof d.delayBlocks === 'number' && d.delayBlocks > 0 ? d.delayBlocks : undefined,
+        chainId: typeof d.chainId === 'number' ? d.chainId : undefined,
+      }
       const map: Record<string, CardId | 'v1' | 'paused'> = { evilMint: 'evilMint', evilOwner: 'evilOwner', evilFee: 'evilFee', v2: 'v2', v1: 'v1', paused: 'paused' }
       for (const [k, addr] of Object.entries(d.impls ?? {})) if (map[k] && typeof addr === 'string') store.implNames.set(addr.toLowerCase(), map[k])
       mark()

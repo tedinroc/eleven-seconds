@@ -87,6 +87,12 @@ export class BlockStream {
     return (last.t - first.t) / dn
   }
 
+  /** blockTimeMs 用了几块的样本 */
+  sampleBlocks(): number {
+    const a = this.arrivals
+    return a.length < 2 ? 0 : a[a.length - 1].n - a[0].n
+  }
+
   start() {
     this.openWs()
   }

@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>十一秒 Eleven Seconds</title>
+<style>
+:root {
+  --bg: #0b1020;
+  --bg2: #121a33;
+  --panel: #18213f;
+  --line: #2a3766;
+  --ink: #f2f4fb;
+  --muted: #a4aed0;
+  --accent: #8c7bff;      /* Monad 紫 */
+  --accent2: #5be3c8;     /* 放行/安全 */
+  --danger: #ff5c7a;      /* 否决/攻击 */
+  --warn: #ffc65c;
+  --sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", system-ui, sans-serif;
+  --mono: "SF Mono", "Menlo", "Consolas", "Roboto Mono", monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: #05070f; color: var(--ink); font-family: var(--sans); overflow: hidden; }
+body { display: grid; place-items: center; }
+
+/* 1600×900 设计画布，按视口等比缩放 */
+#stage {
+  position: relative; width: 1600px; height: 900px; flex: none;
+  background: radial-gradient(1200px 700px at 85% -10%, #26205c 0%, transparent 60%),
+              radial-gradient(900px 600px at -10% 110%, #0f3a44 0%, transparent 55%), var(--bg);
+  overflow: hidden; transform-origin: center center;
+}
+.slide {
+  position: absolute; inset: 0; padding: 80px 110px 90px;
+  display: flex; flex-direction: column;
+  opacity: 0; transform: translateX(80px) scale(.985); pointer-events: none;
+  transition: opacity .55s ease, transform .65s cubic-bezier(.2,.8,.2,1);
+}
+.slide.active { opacity: 1; transform: none; pointer-events: auto; }
+.slide.past { transform: translateX(-80px) scale(.985); }
+
+.kicker { font-size: 26px; letter-spacing: .18em; color: var(--accent); font-weight: 600; margin-bottom: 18px; }
+h1 { font-size: 132px; line-height: 1.02; font-weight: 800; letter-spacing: .02em; }
+h2 { font-size: 72px; line-height: 1.15; font-weight: 800; margin-bottom: 44px; }
+p, li { font-size: 38px; line-height: 1.5; }
+.muted { color: var(--muted); }
+.small { font-size: 28px; }
+.mono { font-family: var(--mono); }
+.red { color: var(--danger); } .green { color: var(--accent2); } .purple { color: var(--accent); } .yellow { color: var(--warn); }
+
+/* 渐入元素：进入页面时依序出现 */
+.slide.active .rise { animation: rise .7s cubic-bezier(.2,.8,.2,1) both; }
+.slide.active .rise:nth-child(2) { animation-delay: .12s; }
+.slide.active .rise:nth-child(3) { animation-delay: .24s; }
+.slide.active .rise:nth-child(4) { animation-delay: .36s; }
+.slide.active .rise:nth-child(5) { animation-delay: .48s; }
+.slide.active .rise:nth-child(6) { animation-delay: .60s; }
+@keyframes rise { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: none; } }
+
+/* 逐条出现（按 → 一条一条弹） */
+.frag { opacity: 0; transform: translateY(26px) scale(.98); transition: opacity .5s ease, transform .55s cubic-bezier(.2,.8,.2,1); }
+.frag.on { opacity: 1; transform: none; }
+
+/* ---------- 1 封面 ---------- */
+.cover { justify-content: center; }
+.cover h1 .en { display: block; font-size: 54px; font-weight: 600; color: var(--muted); letter-spacing: .06em; margin-top: 14px; }
+.cover .sub { font-size: 42px; margin-top: 34px; color: var(--ink); }
+.counter { margin-top: 56px; display: flex; align-items: flex-end; gap: 40px; }
+.counter .blk { font-family: var(--mono); font-size: 92px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; line-height: 1; }
+.counter .lbl { font-size: 26px; color: var(--muted); margin-bottom: 10px; }
+.cells { display: grid; grid-template-columns: repeat(30, 1fr); gap: 7px; margin-top: 30px; width: 1380px; }
+.cell { height: 46px; border-radius: 7px; background: var(--panel); border: 1px solid var(--line); transition: background .2s, transform .2s; position: relative; }
+.cell.fill { background: var(--accent); border-color: var(--accent); }
+.cell.veto { background: var(--danger); border-color: var(--danger); transform: scaleY(1.25); }
+.cell.wait { background: #3a2a3e; border-color: #5a3550; }
+.cells-cap { display: flex; justify-content: space-between; width: 1380px; margin-top: 16px; font-size: 26px; color: var(--muted); }
+.cells-cap b { color: var(--danger); font-weight: 700; }
+.cover .foot { position: absolute; left: 110px; bottom: 60px; font-size: 26px; color: var(--muted); }
+
+/* ---------- 2 问题 ---------- */
+.flow { display: flex; align-items: center; gap: 22px; margin-top: 30px; }
+.flow .step { flex: 1; background: var(--panel); border: 2px solid var(--line); border-radius: 22px; padding: 34px 26px; text-align: center; min-height: 230px; display: flex; flex-direction: column; justify-content: center; }
+.flow .step .n { font-family: var(--mono); font-size: 26px; color: var(--muted); }
+.flow .step .t { font-size: 40px; font-weight: 700; margin-top: 10px; }
+.flow .step.bad { border-color: var(--danger); background: #2a1527; }
+.flow .arrow { font-size: 54px; color: var(--danger); flex: none; }
+.slide.active .flow .step, .slide.active .flow .arrow { animation: rise .6s both; }
+.slide.active .flow > :nth-child(1) { animation-delay: .1s } .slide.active .flow > :nth-child(2) { animation-delay: .3s }
+.slide.active .flow > :nth-child(3) { animation-delay: .45s } .slide.active .flow > :nth-child(4) { animation-delay: .65s }
+.slide.active .flow > :nth-child(5) { animation-delay: .8s } .slide.active .flow > :nth-child(6) { animation-delay: 1s }
+.slide.active .flow > :nth-child(7) { animation-delay: 1.15s }
+.bigline { margin-top: 70px; font-size: 52px; font-weight: 700; }
+
+/* ---------- 3 timelock ---------- */
+.strike { position: relative; display: inline-block; font-size: 120px; font-weight: 800; color: var(--muted); }
+.strike::after { content: ""; position: absolute; left: -2%; top: 52%; height: 12px; width: 0; background: var(--danger); border-radius: 6px; transform: rotate(-4deg); }
+.slide.active .strike::after { animation: strike .6s .6s cubic-bezier(.6,0,.2,1) forwards; }
+@keyframes strike { to { width: 104%; } }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 40px; }
+.card { background: var(--panel); border: 2px solid var(--line); border-radius: 22px; padding: 34px 38px; }
+.card h3 { font-size: 40px; margin-bottom: 12px; }
+.card p { font-size: 34px; color: var(--muted); }
+
+/* ---------- 4 新做法 ---------- */
+.innov { display: flex; flex-direction: column; gap: 28px; margin-top: 4px; }
+.innov .row { display: flex; gap: 34px; align-items: flex-start; background: var(--panel); border: 2px solid var(--line); border-left: 10px solid var(--accent); border-radius: 20px; padding: 28px 36px; }
+.innov .num { font-family: var(--mono); font-size: 64px; font-weight: 800; color: var(--accent); line-height: 1; min-width: 70px; }
+.innov .t { font-size: 44px; font-weight: 800; }
+.innov .d { font-size: 32px; color: var(--muted); margin-top: 6px; line-height: 1.45; }
+.footnote { margin-top: auto; font-size: 28px; color: var(--muted); }
+
+/* ---------- 5 演示 ---------- */
+.demo { justify-content: center; align-items: center; text-align: center; }
+.demo .go { font-size: 150px; font-weight: 800; background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.demo ol { list-style: none; margin-top: 50px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 20px; width: 100%; }
+.demo li { background: var(--panel); border: 2px solid var(--line); border-radius: 18px; padding: 24px 18px; font-size: 30px; line-height: 1.4; }
+.demo li b { display: block; font-family: var(--mono); color: var(--accent); font-size: 34px; margin-bottom: 6px; }
+.demo .backup { position: absolute; right: 70px; bottom: 50px; font-size: 26px; color: var(--muted); border: 2px dashed var(--line); border-radius: 14px; padding: 14px 22px; }
+.pulse { display: inline-block; width: 22px; height: 22px; border-radius: 50%; background: var(--danger); margin-right: 16px; vertical-align: middle; animation: pulse 1.2s infinite; }
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,92,122,.6); } 50% { box-shadow: 0 0 0 18px rgba(255,92,122,0); } }
+
+/* ---------- 6 架构 ---------- */
+.arch { flex: 1; position: relative; }
+.arch svg { width: 100%; height: 100%; }
+.arch .box rect { fill: var(--panel); stroke: var(--line); stroke-width: 3; }
+.arch .box.main rect { stroke: var(--accent); }
+.arch .box.sen rect { stroke: var(--accent2); }
+.arch .box.atk rect { stroke: var(--danger); }
+.arch text { fill: var(--ink); font-family: var(--sans); }
+.arch .t1 { font-size: 34px; font-weight: 800; }
+.arch .t2 { font-size: 24px; fill: var(--muted); }
+.arch .lab { font-size: 23px; fill: var(--muted); }
+.arch .edge { stroke: var(--muted); stroke-width: 3; fill: none; }
+.arch .edge.red { stroke: var(--danger); }
+.arch .edge.green { stroke: var(--accent2); }
+.slide.active .arch .draw { stroke-dasharray: 900; stroke-dashoffset: 900; animation: draw 1.2s .4s ease forwards; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+.chips { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; }
+.chip { font-size: 28px; padding: 10px 22px; border-radius: 999px; border: 2px solid var(--accent2); color: var(--accent2); }
+
+/* ---------- 7 Monad ---------- */
+.mtable { width: 100%; border-collapse: collapse; font-size: 36px; }
+.mtable th { text-align: left; font-size: 26px; color: var(--muted); font-weight: 600; padding: 0 20px 12px; border-bottom: 2px solid var(--line); }
+.mtable td { padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.mtable td.r { text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; }
+.mtable tr.monad td { color: var(--ink); background: rgba(140,123,255,.14); }
+.mtable tr.monad td:first-child { border-left: 8px solid var(--accent); }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; margin-top: 34px; }
+.stat { background: var(--panel); border: 2px solid var(--line); border-radius: 20px; padding: 22px 24px; }
+.stat .v { font-family: var(--mono); font-size: 64px; font-weight: 800; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.stat .k { font-size: 26px; color: var(--muted); margin-top: 8px; line-height: 1.35; }
+.note { margin-top: 24px; font-size: 27px; color: var(--muted); }
+
+/* ---------- 8 范围与下一步 ---------- */
+.two { display: grid; grid-template-columns: 1fr 1.15fr; gap: 40px; }
+.two ul { list-style: none; display: flex; flex-direction: column; gap: 18px; }
+.two li { font-size: 32px; line-height: 1.45; padding-left: 38px; position: relative; }
+.two li::before { content: ""; position: absolute; left: 0; top: 18px; width: 16px; height: 16px; border-radius: 4px; background: var(--accent); }
+.two .next li::before { background: var(--accent2); }
+.two h3 { font-size: 36px; margin-bottom: 22px; color: var(--muted); font-weight: 600; letter-spacing: .08em; }
+.closing { margin-top: auto; font-size: 46px; font-weight: 800; }
+
+/* ---------- 页脚与进度 ---------- */
+#bar { position: absolute; left: 0; bottom: 0; height: 8px; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .5s ease; z-index: 5; }
+#num { position: absolute; right: 44px; bottom: 26px; font-family: var(--mono); font-size: 22px; color: var(--muted); z-index: 5; }
+#hint { position: absolute; left: 44px; bottom: 26px; font-size: 20px; color: #59628a; z-index: 5; }
+
+@media (prefers-reduced-motion: reduce) {
+  .slide, .frag { transition: none; }
+  .slide.active .rise, .slide.active .flow > *, .slide.active .arch .draw { animation: none; stroke-dashoffset: 0; }
+  .slide.active .strike::after { animation: none; width: 104%; }
+}
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- 1 封面 -->
+  <section class="slide cover" data-title="封面">
+    <div class="kicker rise">MONAD BLITZ 上海 · 2026-10-17</div>
+    <h1 class="rise">十一秒<span class="en">Eleven Seconds</span></h1>
+    <p class="sub rise">给合约升级装一个 <b class="purple">30 个区块</b>（约 9–10 秒）的冷静期</p>
+    <div class="rise">
+      <div class="counter">
+        <div>
+          <div class="lbl">当前区块</div>
+          <div class="blk" id="blk">71,719,034</div>
+        </div>
+        <div class="lbl" id="cellLbl">冷静期 第 0 / 30 块</div>
+      </div>
+      <div class="cells" id="cells"></div>
+      <div class="cells-cap"><span>提案 · 区块 71,719,034</span><span><b>第 9 块：否决落地</b> · 攻击者还要等 21 块</span><span>可执行</span></div>
+    </div>
+    <div class="foot">Monad 测试网 · 现场实测（区块编号与第 9 块否决均为今日提案 #1 的链上数据）</div>
+  </section>
+
+  <!-- 2 问题 -->
+  <section class="slide" data-title="问题">
+    <div class="kicker">问题</div>
+    <h2>合约升级，是 Web3 最危险的一个按钮</h2>
+    <div class="flow">
+      <div class="step bad"><div class="n">01</div><div class="t">升级私钥泄露</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="n">02</div><div class="t">部署恶意合约</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="n">03</div><div class="t">升级 proxy</div></div>
+      <div class="arrow">→</div>
+      <div class="step bad"><div class="n">04</div><div class="t">无限铸币</div></div>
+    </div>
+    <p class="bigline rise">攻击者部署完恶意合约，<span class="red">紧接着就能升级</span>。<br><span class="muted">这不是假设，是反复出现的攻击模式。</span></p>
+  </section>
+
+  <!-- 3 为什么没人装 timelock -->
+  <section class="slide" data-title="为什么没人装 timelock">
+    <div class="kicker">为什么没人装 timelock</div>
+    <div class="rise"><span class="strike">48–72 小时 timelock</span></div>
+    <div class="cols">
+      <div class="card rise"><h3>太慢</h3><p>紧急修 bug 也被卡住几天，安全和速度只能选一个。</p></div>
+      <div class="card rise"><h3>只让你等，不替你拦</h3><p>timelock 只是延迟，不会检查新合约有没有问题。</p></div>
+    </div>
+    <p class="bigline rise" style="margin-top:56px">结果：很多可升级合约的升级权，<span class="red">就是一把私钥</span>。</p>
+  </section>
+
+  <!-- 4 我们的新做法 -->
+  <section class="slide" data-title="我们的新做法">
+    <div class="kicker">我们的新做法</div>
+    <h2 style="margin-bottom:34px">三个新的地方</h2>
+    <div class="innov">
+      <div class="row frag"><div class="num">1</div><div><div class="t">验货靠攻击模拟，不靠读代码</div><div class="d">升级生效之前，哨兵在模拟器里把新合约换上去，用陌生地址先打一遍，按不变量判定。</div></div></div>
+      <div class="row frag"><div class="num">2</div><div><div class="t">冷静期按区块算：30 个区块</div><div class="d">在 Monad 上约 9–10 秒，短到可以<b class="green">永远开着</b>，运维不被拖慢。</div></div></div>
+      <div class="row frag"><div class="num">3</div><div><div class="t">守门人自己也被锁住</div><div class="d">被盗的 admin 拔不掉哨兵；改哨兵、改延迟也要走同一个冷静期。任一哨兵都能否决，模拟失败一律否决。</div></div></div>
+    </div>
+    <p class="footnote frag">AI 把模拟差异翻成中文理由，哈希上链给多签参考 · AI 不在否决路径上</p>
+  </section>
+
+  <!-- 5 现场演示 -->
+  <section class="slide demo" data-title="现场演示">
+    <div class="kicker rise"><span class="pulse"></span>现场演示 · Monad 测试网</div>
+    <div class="go rise">切到战情室</div>
+    <ol class="rise">
+      <li><b>01</b>用「泄露的私钥」提交恶意升级</li>
+      <li><b>02</b>3 个哨兵模拟、判定、否决</li>
+      <li><b>03</b>攻击者 execute → ProposalVetoed</li>
+      <li><b>04</b>评委盲选一张卡 · 关掉一个哨兵</li>
+      <li><b>05</b>正常升级 30 块后生效</li>
+    </ol>
+  </section>
+
+  <!-- 6 怎么做到 -->
+  <section class="slide" data-title="怎么做到">
+    <div class="kicker">怎么做到</div>
+    <h2 style="margin-bottom:10px">GuardedAdmin ＋ 3 个独立哨兵</h2>
+    <div class="arch">
+      <svg viewBox="0 0 1380 520" role="img" aria-label="架构图：owner 提案进入 GuardedAdmin 的 30 区块冷静期，三个哨兵用 eth_simulateV1 模拟后可否决，到期后经 ProxyAdmin 升级 proxy">
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#a4aed0"/></marker>
+          <marker id="ahr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#ff5c7a"/></marker>
+          <marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5be3c8"/></marker>
+        </defs>
+        <!-- 顶行 -->
+        <g class="box atk"><rect x="0" y="20" width="250" height="120" rx="18"/><text class="t1" x="125" y="72" text-anchor="middle">owner 钥匙</text><text class="t2" x="125" y="110" text-anchor="middle">（假设已泄露）</text></g>
+        <g class="box main"><rect x="330" y="0" width="560" height="160" rx="20"/><text class="t1" x="610" y="52" text-anchor="middle">GuardedAdmin</text><text class="t2" x="610" y="94" text-anchor="middle">提案 → 30 个区块 → 执行</text><text class="t2" x="610" y="130" text-anchor="middle">任一 guardian 可否决 · breakGlass 暂停</text></g>
+        <g class="box"><rect x="970" y="20" width="190" height="120" rx="18"/><text class="t1" x="1065" y="72" text-anchor="middle">ProxyAdmin</text><text class="t2" x="1065" y="110" text-anchor="middle">owner 已转交</text></g>
+        <g class="box"><rect x="1210" y="20" width="170" height="120" rx="18"/><text class="t1" x="1295" y="72" text-anchor="middle">Proxy</text><text class="t2" x="1295" y="110" text-anchor="middle">dBTC</text></g>
+        <path class="edge draw" d="M250 80 H322" marker-end="url(#ah)"/>
+        <text class="lab" x="258" y="64">提案</text>
+        <path class="edge green draw" d="M890 80 H962" marker-end="url(#ahg)"/>
+        <path class="edge green draw" d="M1160 80 H1202" marker-end="url(#ahg)"/>
+        <text class="lab" x="898" y="64">到期执行</text>
+        <!-- 哨兵 -->
+        <g class="box sen"><rect x="180" y="300" width="300" height="130" rx="18"/><text class="t1" x="330" y="355" text-anchor="middle">哨兵 1</text><text class="t2" x="330" y="395" text-anchor="middle">独立进程 · 独立钥匙</text></g>
+        <g class="box sen"><rect x="540" y="300" width="300" height="130" rx="18"/><text class="t1" x="690" y="355" text-anchor="middle">哨兵 2</text><text class="t2" x="690" y="395" text-anchor="middle">独立进程 · 独立钥匙</text></g>
+        <g class="box sen"><rect x="900" y="300" width="300" height="130" rx="18"/><text class="t1" x="1050" y="355" text-anchor="middle">哨兵 3</text><text class="t2" x="1050" y="395" text-anchor="middle">独立进程 · 独立钥匙</text></g>
+        <path class="edge draw" d="M500 160 V 230 H 330 V 292" marker-end="url(#ah)"/>
+        <path class="edge draw" d="M610 160 V 292" marker-end="url(#ah)" transform="translate(80 0)"/>
+        <path class="edge draw" d="M720 160 V 230 H 1050 V 292" marker-end="url(#ah)"/>
+        <text class="lab" x="740" y="218">Proposed 事件</text>
+        <path class="edge red draw" d="M420 300 C 420 250, 400 210, 400 168" marker-end="url(#ahr)"/>
+        <text class="lab" x="230" y="250" style="fill:#ff5c7a">veto(id, 规则)</text>
+        <!-- 模拟 -->
+        <text class="t2" x="690" y="478" text-anchor="middle">eth_simulateV1 ＋ stateOverride：把新合约换进 proxy，陌生地址先打一遍</text>
+        <text class="t2" x="690" y="512" text-anchor="middle">哨兵只看字节码，不需要攻击者公开源码</text>
+      </svg>
+    </div>
+    <div class="chips"><span class="chip">totalSupply 不变</span><span class="chip">owner 不变</span><span class="chip">转账守恒</span><span class="chip">正常转账必须成功</span><span class="chip" style="border-color:var(--danger);color:var(--danger)">模拟失败 → 否决</span></div>
+  </section>
+
+  <!-- 7 为什么是 Monad -->
+  <section class="slide" data-title="为什么是 Monad">
+    <div class="kicker">为什么是 Monad</div>
+    <h2 style="margin-bottom:24px">同样 30 个区块</h2>
+    <table class="mtable rise">
+      <thead><tr><th>链</th><th>出块时间</th><th style="text-align:right">30 个区块</th></tr></thead>
+      <tbody>
+        <tr><td>以太坊</td><td>约 12 秒/块</td><td class="r">约 6 分钟</td></tr>
+        <tr><td>BSC</td><td>约 0.45 秒/块</td><td class="r">约 13.5 秒</td></tr>
+        <tr class="monad"><td><b>Monad 测试网</b></td><td>今日实测约 0.30 秒/块 · 亚秒级最终性</td><td class="r purple">约 9 秒</td></tr>
+      </tbody>
+    </table>
+    <div class="stats">
+      <div class="stat rise"><div class="v red"><span class="count" data-to="9">9</span> 块</div><div class="k">提案后第 9 块<br>否决就落地</div></div>
+      <div class="stat rise"><div class="v green"><span class="count" data-to="21">21</span> 块</div><div class="k">攻击者还要等<br>才能 execute</div></div>
+      <div class="stat rise"><div class="v"><span class="count" data-to="2.68" data-dec="2">2.68</span> 秒</div><div class="k">哨兵看到提案<br>→ 否决回执</div></div>
+      <div class="stat rise"><div class="v yellow"><span class="count" data-to="0.0126" data-dec="4">0.0126</span></div><div class="k">MON · 单次否决成本<br>123,112 gas × 102 gwei</div></div>
+    </div>
+    <p class="note">今日测试网提案 #1：3/3 哨兵否决，execute 回 <span class="mono">ProposalVetoed</span>；提案 #2（v2）3/3 放行，30 块后生效。BSC 也能做到秒级；Monad 的优势是粒度更细、确定性最终性（否决落地后不会被重组）、成本低。</p>
+  </section>
+
+  <!-- 8 范围与下一步 -->
+  <section class="slide" data-title="已知范围与下一步">
+    <div class="kicker">已知范围与下一步</div>
+    <h2 style="margin-bottom:34px">保护升级路径，接入只要一步</h2>
+    <div class="two">
+      <div class="rise">
+        <h3>现在的范围</h3>
+        <ul>
+          <li>保护升级路径：实现合约变更，以及守门人自己的配置</li>
+          <li>模拟抓「陌生地址能改状态」这一类</li>
+          <li>3 个哨兵是独立进程、独立钥匙；至少一个在线就能否决</li>
+          <li>接入：把 ProxyAdmin 的 owner 转给 GuardedAdmin，原合约不用重新部署</li>
+        </ul>
+      </div>
+      <div class="rise next">
+        <h3>下一步</h3>
+        <ul>
+          <li><b>严格模式默认开启</b>：新 codehash 需第二把钥匙预先核准（已实现，开关 STRICT=1）</li>
+          <li><b>押金哨兵网络</b>：任何人押保证金都能跑哨兵</li>
+          <li><b>多签 override</b>：误判时由多签放行，本身也走冷静期</li>
+          <li>minter 等其他特权也放到冷静期后面</li>
+        </ul>
+      </div>
+    </div>
+    <p class="closing rise">timelock 不该是「不想装」，而是「<span class="purple">没理由不装</span>」。谢谢！</p>
+  </section>
+
+  <div id="bar"></div>
+  <div id="num"></div>
+  <div id="hint">← → 翻页 · F 全屏</div>
+</div>
+
+<script>
+(function () {
+  var stage = document.getElementById('stage');
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var bar = document.getElementById('bar'), num = document.getElementById('num');
+  var cur = 0;
+
+  function fit() {
+    var s = Math.min(window.innerWidth / 1600, window.innerHeight / 900);
+    stage.style.transform = 'scale(' + s + ')';
+  }
+  window.addEventListener('resize', fit); fit();
+
+  function frags(i) { return Array.prototype.slice.call(slides[i].querySelectorAll('.frag')); }
+
+  function countUp(el) {
+    var to = parseFloat(el.getAttribute('data-to')), dec = parseInt(el.getAttribute('data-dec') || '0', 10);
+    var t0 = null, dur = 1100;
+    function step(t) {
+      if (t0 === null) t0 = t;
+      var p = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+      el.textContent = (to * e).toFixed(dec);
+      if (p < 1) requestAnimationFrame(step); else el.textContent = to.toFixed(dec);
+    }
+    requestAnimationFrame(step);
+  }
+
+  function show(i, fromBack) {
+    i = Math.max(0, Math.min(slides.length - 1, i));
+    slides.forEach(function (s, k) {
+      s.classList.toggle('active', k === i);
+      s.classList.toggle('past', k < i);
+    });
+    // 往回翻时把逐条内容全部亮出；往前翻时从头逐条
+    frags(i).forEach(function (f) { f.classList.toggle('on', !!fromBack); });
+    slides[i].querySelectorAll('.count').forEach(countUp);
+    cur = i;
+    bar.style.width = ((i + 1) / slides.length * 100) + '%';
+    num.textContent = (i + 1) + ' / ' + slides.length;
+    try { history.replaceState(null, '', '#' + (i + 1)); } catch (e) {}
+  }
+
+  function next() {
+    var hidden = frags(cur).filter(function (f) { return !f.classList.contains('on'); });
+    if (hidden.length) { hidden[0].classList.add('on'); return; }
+    if (cur < slides.length - 1) show(cur + 1, false);
+  }
+  function prev() { if (cur > 0) show(cur - 1, true); }
+
+  document.addEventListener('keydown', function (e) {
+    if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].indexOf(e.key) >= 0) { e.preventDefault(); next(); }
+    else if (['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'].indexOf(e.key) >= 0) { e.preventDefault(); prev(); }
+    else if (e.key === 'Home') show(0, false);
+    else if (e.key === 'End') show(slides.length - 1, true);
+    else if (e.key === 'f' || e.key === 'F') {
+      if (!document.fullscreenElement) { (document.documentElement.requestFullscreen || function () {}).call(document.documentElement); }
+      else if (document.exitFullscreen) document.exitFullscreen();
+    }
+  });
+  document.addEventListener('click', function (e) { if (e.clientX > window.innerWidth / 3) next(); else prev(); });
+
+  // 封面：区块计数器 + 30 格冷静期（每 0.30 秒一块，与今日实测出块时间一致）
+  var cells = document.getElementById('cells'), blkEl = document.getElementById('blk'), lbl = document.getElementById('cellLbl');
+  for (var c = 0; c < 30; c++) { var d = document.createElement('div'); d.className = 'cell'; cells.appendChild(d); }
+  var cellEls = cells.children, BASE = 71719034, tick = 0, pause = 0;
+  function fmt(n) { return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  setInterval(function () {
+    if (cur !== 0) return;
+    if (pause > 0) { pause--; if (pause === 0) { tick = 0; for (var k = 0; k < 30; k++) cellEls[k].className = 'cell'; } return; }
+    tick++;
+    blkEl.textContent = fmt(BASE + tick);
+    var cell = cellEls[tick - 1];
+    if (cell) cell.className = 'cell ' + (tick === 9 ? 'veto' : tick > 9 ? 'wait' : 'fill');
+    lbl.innerHTML = tick < 9 ? '冷静期 第 ' + tick + ' / 30 块' : tick === 9 ? '<span class="red">第 9 块 · 否决落地</span>' : '<span class="red">已否决</span> · 攻击者还要等 ' + (30 - tick) + ' 块';
+    if (tick >= 30) { lbl.innerHTML = '<span class="red">已否决</span> · execute → ProposalVetoed'; pause = 10; }
+  }, 300);
+
+  var h = parseInt((location.hash || '').slice(1), 10);
+  show(isNaN(h) ? 0 : h - 1, false);
+})();
+</script>
+</body>
+</html>

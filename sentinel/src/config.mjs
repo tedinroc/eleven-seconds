@@ -22,7 +22,11 @@ const TESTNET_DEFAULTS = {
   RPC_URL: 'https://rpc-testnet.monadinfra.com',
   SIM_RPCS: 'https://testnet-rpc.monad.xyz,https://10143.rpc.thirdweb.com',
   BROADCAST_RPCS: 'https://testnet-rpc.monad.xyz,https://rpc-testnet.monadinfra.com,https://rpc.ankr.com/monad_testnet',
+  // Read failover order after RPC_URL (deduplicated): the other getLogs provider, then the official
+  // endpoint as a last resort only (spec 4.2.3 keeps the simulation providers for simulation).
+  READ_FALLBACKS: 'https://rpc.ankr.com/monad_testnet,https://rpc-testnet.monadinfra.com,https://testnet-rpc.monad.xyz',
   WS_URL: 'wss://rpc-testnet.monadinfra.com',
+  WS_FALLBACKS: 'wss://rpc-testnet.monadinfra.com,wss://testnet-rpc.monad.xyz',
   WS_LOGS_KIND: 'monadLogs',
   WS_HEADS_KIND: 'monadNewHeads',
   FINALITY: 'tag',
@@ -46,6 +50,8 @@ export function loadConfig(env = process.env) {
   const index = Number(get('SENTINEL_INDEX', '1'))
   const rpcUrl = get('RPC_URL')
   const wsDefault = network === 'anvil' ? rpcUrl.replace(/^http/, 'ws') : undefined
+  const uniq = (xs) => [...new Set(xs)]
+  const wsUrl = get('WS_URL', wsDefault) || null
   const cfg = {
     network,
     mode: get('MODE', network === 'testnet' ? 'testnet' : 'replay'),
@@ -59,9 +65,17 @@ export function loadConfig(env = process.env) {
     keyFile: get('KEY_FILE'),
     anvilAccount: get('ANVIL_ACCOUNT'),
     rpcUrl,
+    // RPC_URL first, then READ_FALLBACKS; READ_RPCS replaces the whole list.
+    readRpcs: uniq(csv(get('READ_RPCS', [rpcUrl, ...csv(get('READ_FALLBACKS', ''))].join(',')))),
+    readRace: Number(get('READ_RACE', '2')),
+    readHedgeMs: Number(get('READ_HEDGE_MS', '800')),
     simRpcs: csv(get('SIM_RPCS', rpcUrl)),
     broadcastRpcs: csv(get('BROADCAST_RPCS', rpcUrl)),
-    wsUrl: get('WS_URL', wsDefault) || null,
+    wsUrl,
+    // WS_URL first, then WS_FALLBACKS (rotated on every reconnect after a failure).
+    wsUrls: wsUrl ? uniq([wsUrl, ...csv(get('WS_FALLBACKS', ''))]) : [],
+    wsConnectTimeoutMs: Number(get('WS_CONNECT_TIMEOUT_MS', '5000')),
+    wsStaleMs: Number(get('WS_STALE_MS', '10000')),
     wsLogsKind: get('WS_LOGS_KIND'),
     wsHeadsKind: get('WS_HEADS_KIND'),
     pollMs: Number(get('POLL_MS', '300')),
@@ -75,7 +89,10 @@ export function loadConfig(env = process.env) {
     simCallGas: BigInt(get('SIM_CALL_GAS', '300000')),
     simReadGas: BigInt(get('SIM_READ_GAS', '100000')),
     simMaxCalls: Number(get('SIM_MAX_CALLS', '150')),
-    simKeepaliveMs: Number(get('SIM_KEEPALIVE_MS', network === 'testnet' ? '5000' : '0')),
+    // eth_chainId on every idle client (simulation, read fallbacks, broadcast) so no request pays a
+    // new TLS handshake; SIM_WAIT_PING_MS: a simulation that finds the ping on the warm socket waits.
+    keepaliveMs: Number(get('KEEPALIVE_MS', get('SIM_KEEPALIVE_MS', network === 'testnet' ? '12000' : '0'))),
+    simWaitPingMs: Number(get('SIM_WAIT_PING_MS', '600')),
     finality: get('FINALITY'),
     feeRefreshMs: Number(get('FEE_REFRESH_MS', '10000')),
     rpcTimeoutMs: Number(get('RPC_TIMEOUT_MS', '4000')),

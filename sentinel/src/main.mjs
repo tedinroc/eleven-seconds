@@ -7,7 +7,7 @@ import { decodeEventLog, decodeFunctionResult, encodeFunctionData, encodeAbiPara
 import { loadConfig } from './config.mjs'
 import { loadAbis } from './abi.mjs'
 import { loadRules } from './rules.mjs'
-import { createRpc, RpcError } from './rpc.mjs'
+import { clientFor, allClients, createFailover, keepWarm, isRetryable, suspect } from './rpc.mjs'
 import { createEventServer } from './sse.mjs'
 import { Vetoer, readGasLimits } from './vetoer.mjs'
 import { buildSimulation, evaluateSimulation, implFromSlot, IMPLEMENTATION_SLOT, ViewRevert } from './simulate.mjs'
@@ -38,11 +38,16 @@ const gasLimits = readGasLimits(existsSync(cfg.gasPath) ? JSON.parse(readFileSyn
 const PROPOSED_TOPIC = toEventSelector('Proposed(uint256,uint8,address,uint256,bytes,bytes32,uint64)')
 
 // ---------------------------------------------------------------- RPC clients (created once, kept warm)
-const main = createRpc(cfg.rpcUrl, { timeoutMs: cfg.rpcTimeoutMs })
-const sims = cfg.simRpcs.map((u) => createRpc(u, { timeoutMs: cfg.simTimeoutMs }))
+// One client (one keep-alive agent) per URL, shared by every path that uses that provider.
+const readClients = cfg.readRpcs.map((u) => clientFor(u, { timeoutMs: cfg.rpcTimeoutMs }))
+// Polling, eth_call, receipts, nonce and fees: sticky failover, next provider at once on a transport error.
+const main = createFailover(readClients, { log, name: 'read rpc' })
+// Latency-critical reads on proposal_seen (newImpl code) race the first READ_RACE read providers.
+const racePool = readClients.slice(0, Math.max(1, cfg.readRace))
+const sims = cfg.simRpcs.map((u) => clientFor(u, { timeoutMs: cfg.simTimeoutMs }))
 // Spread the three sentinels over the simulation providers: primary = (index-1) mod n.
 const simOrder = sims.map((_, k) => sims[(cfg.index - 1 + k) % sims.length])
-const broadcastRpcs = cfg.broadcastRpcs.map((u) => (u === cfg.rpcUrl ? main : sims.find((s) => s.url === u) ?? createRpc(u, { timeoutMs: 5_000 })))
+const broadcastRpcs = cfg.broadcastRpcs.map((u) => clientFor(u, { timeoutMs: 5_000 }))
 
 const chainIdOnRpc = Number(await retry(() => main.call('eth_chainId'), { log, what: 'eth_chainId' }))
 if (chainIdOnRpc !== D.chainId) throw new Error(`RPC chainId ${chainIdOnRpc} != deployments chainId ${D.chainId}`)
@@ -66,11 +71,73 @@ const ethCall = async (to, abi, functionName, args = []) => {
   const ret = await main.call('eth_call', [{ to, data }, 'latest'])
   return decodeFunctionResult({ abi, functionName, data: ret })
 }
+// Deployed code never changes, so non-empty code is cached; '0x' is never cached (a lagging node).
 const codeCache = new Map()
 const getCode = async (addr) => {
   const k = lc(addr)
-  if (!codeCache.has(k)) codeCache.set(k, await main.call('eth_getCode', [k, 'latest']))
+  if (!codeCache.has(k)) {
+    const c = await main.call('eth_getCode', [k, 'latest'])
+    if (!c || c === '0x') return c
+    codeCache.set(k, c)
+  }
   return codeCache.get(k)
+}
+// newImpl code for a proposal: race the read providers, accept the first answer whose keccak matches
+// the proposal's codehash (a lagging node may still answer '0x'); if none matches, the first answer.
+// If no racer has a matching answer after READ_HEDGE_MS, the rest of the read chain joins the race
+// (on testnet that is the official endpoint: a tail-only extra read).
+async function fetchNewCode(addr, codehash) {
+  const k = lc(addr)
+  if (codeCache.has(k)) return { code: codeCache.get(k), label: 'cache' }
+  const answers = []
+  const want = lc(codehash)
+  const ask = (c) => c.call('eth_getCode', [k, 'latest']).then((code) => {
+    answers.push({ code, label: c.label })
+    if (code && code !== '0x' && keccak256(code) === want) return { code, label: c.label }
+    throw new Error(`${c.label}: code does not match codehash`)
+  })
+  const tries = racePool.map(ask)
+  const rest = readClients.filter((c) => !racePool.includes(c))
+  if (rest.length && cfg.readHedgeMs > 0) {
+    // Starts after READ_HEDGE_MS, or at once when every racer has already failed (tls eof, 429...).
+    let start
+    const hedge = new Promise((resolve, reject) => {
+      let started = false
+      start = () => {
+        if (started) return
+        started = true
+        Promise.any(rest.map(ask)).then(resolve, reject)
+      }
+    })
+    const timer = setTimeout(start, cfg.readHedgeMs)
+    Promise.any([...tries]).then(() => clearTimeout(timer), () => {
+      clearTimeout(timer)
+      start()
+    })
+    tries.push(hedge)
+  }
+  try {
+    const r = await Promise.any(tries)
+    codeCache.set(k, r.code)
+    return r
+  } catch {
+    if (answers.length) return answers[0]
+    const c = await main.call('eth_getCode', [k, 'latest']) // every racer failed: the failover chain
+    return { code: c, label: main.label }
+  }
+}
+// Current implementation (ERC-1967 slot) and its selectors, refreshed in the background; only used
+// for selectorsAdded/Removed (informational), never for the verdict.
+const implCache = { impl: null, at: 0, selectors: new Map() }
+async function currentImplSelectors() {
+  let impl = implCache.impl
+  if (!impl || Date.now() - implCache.at > 15_000) {
+    impl = implFromSlot(await main.call('eth_getStorageAt', [D.proxy, IMPLEMENTATION_SLOT, 'latest']))
+    implCache.impl = impl
+    implCache.at = Date.now()
+  }
+  if (!implCache.selectors.has(impl)) implCache.selectors.set(impl, extractSelectors(await getCode(impl)))
+  return implCache.selectors.get(impl)
 }
 const isApproved = async (hash) => {
   if (!hash || BigInt(hash) === 0n) return false
@@ -112,6 +179,8 @@ const server = createEventServer({
   log,
   health: () => ({
     ok: healthy(), source: cfg.source, mode: cfg.mode, lastBlock: state.lastBlock, rpc: main.label, ws: state.wsConnected,
+    wsReconnects: state.wsReconnects ?? 0, rpcSwitches: main.switches.length,
+    sockets: Object.fromEntries(allClients().map((c) => [c.label, { new: c.stats.fresh, reused: c.stats.reused, errors: c.stats.errors }])),
     guardian: account.address, nonce: vetoer.nonce, strict: cfg.strict, dryRun: cfg.dryRun, proposalsSeen: seen.size, duplicatesDropped: state.duplicates,
   }),
   onAttach: cfg.attach ? handleAttach : null,
@@ -138,16 +207,20 @@ async function handleAttach(body) {
 async function simulate(params) {
   const deadline = Date.now() + cfg.simBudgetMs
   const errors = []
-  for (const rpc of simOrder.slice(0, 2)) {
+  // Primary by sentinel index, but a provider whose last request or keep-warm ping died on the
+  // transport in the last 30 s goes second (spec 4.2.2: still at most one retry on the other one).
+  const order = [...simOrder.filter((r) => !suspect(r)), ...simOrder.filter((r) => suspect(r))]
+  for (const rpc of order.slice(0, 2)) {
     const remaining = deadline - Date.now()
     if (remaining <= 50) break
     const t = Date.now()
     try {
-      const result = await rpc.call('eth_simulateV1', params, { timeoutMs: Math.min(cfg.simTimeoutMs, remaining) })
-      return { result, rpc: rpc.label, errors }
+      const result = await rpc.call('eth_simulateV1', params, { timeoutMs: Math.min(cfg.simTimeoutMs, remaining), waitPingMs: cfg.simWaitPingMs })
+      return { result, rpc: rpc.label, errors, reusedSocket: rpc.stats.lastReused }
     } catch (e) {
+      // Any failure (tls eof, reset, timeout, 429, JSON-RPC error) moves to the other provider at once.
       errors.push(`${rpc.label}: ${e.message.slice(0, 160)} (${Date.now() - t} ms)`)
-      log.warn(`simulate on ${rpc.label} failed${e instanceof RpcError && e.retryable ? ' (retryable)' : ''}: ${e.message.slice(0, 200)}`)
+      log.warn(`simulate on ${rpc.label} failed${isRetryable(e) ? ' (transport)' : ''}: ${e.message.slice(0, 200)}`)
     }
   }
   return { result: null, errors }
@@ -182,13 +255,18 @@ async function judge(p) {
     return approved ? pass([check], { approvalKey: key }) : veto('R7_CONFIG_GUARD', [check], { approvalKey: key })
   }
 
-  // kind 0: upgrade. Fetch what the simulation needs in parallel (main RPC, not the sim RPCs).
+  // kind 0: upgrade. Only newImpl's code is on the critical path (raced over the warm read
+  // providers); holder balance and the current impl's selectors come from background caches.
   const hasData = p.data && p.data !== '0x'
-  const [newCode, slot, approved] = await Promise.all([
-    getCode(p.target),
-    main.call('eth_getStorageAt', [D.proxy, IMPLEMENTATION_SLOT, 'latest']),
+  const oldSelP = currentImplSelectors().catch((e) => {
+    log.warn(`current impl selectors: ${e.message.slice(0, 120)}`)
+    return null
+  })
+  const [{ code: newCode, label: codeRpc }, approved] = await Promise.all([
+    fetchNewCode(p.target, p.codehash),
     cfg.strict || hasData ? isApproved(p.codehash) : Promise.resolve(false),
   ])
+  const codeMs = Date.now() - t
   if (cfg.strict && !approved) {
     return veto('R5_STRICT_CODEHASH', [{ name: 'R5_STRICT_CODEHASH', before: p.codehash, after: 'not approved', ok: false }])
   }
@@ -198,9 +276,6 @@ async function judge(p) {
   if (!newCode || newCode === '0x' || keccak256(newCode) !== lc(p.codehash)) {
     return veto('R6_SIM_FAILURE', [{ name: 'R6_SIM_FAILURE', before: p.codehash, after: 'code missing or codehash mismatch', ok: false }])
   }
-  const oldImpl = implFromSlot(slot)
-  const oldSelectors = extractSelectors(await getCode(oldImpl))
-
   const holder = D.holders[0]
   let bal = state.holderBalance.get(holder)
   if (!bal) bal = BigInt(await ethCall(D.proxy, abis.token, 'balanceOf', [holder]))
@@ -211,13 +286,19 @@ async function judge(p) {
     tokenAbi: abis.token, callGas: cfg.simCallGas, readGas: cfg.simReadGas, maxCalls: cfg.simMaxCalls,
   })
   const simT = Date.now()
-  const { result, rpc, errors } = await simulate(params)
+  const { result, rpc, errors, reusedSocket } = await simulate(params)
+  const simRequestMs = Date.now() - simT
+  const oldSelectors = await oldSelP
   if (!result) {
     return veto('R6_SIM_FAILURE', [{ name: 'R6_SIM_FAILURE', before: 'eth_simulateV1', after: `failed on ${errors.length} provider(s)`, ok: false }], { errors })
   }
   try {
-    const r = evaluateSimulation(result, layout, { tokenAbi: abis.token, oldSelectors })
-    return { ...r, simMs: Date.now() - t, extra: { ...r.extra, simRpc: rpc, simRequestMs: Date.now() - simT, retried: errors.length > 0 } }
+    const r = evaluateSimulation(result, layout, { tokenAbi: abis.token, oldSelectors: oldSelectors ?? [] })
+    return {
+      ...r,
+      simMs: Date.now() - t,
+      extra: { ...r.extra, simRpc: rpc, simRequestMs, retried: errors.length > 0, ...(errors.length ? { errors } : {}), codeRpc, codeMs, simReusedSocket: reusedSocket, ...(oldSelectors ? {} : { selectorsUnknown: true }) },
+    }
   } catch (e) {
     if (e instanceof ViewRevert) {
       return veto('R6_SIM_FAILURE', [{ name: 'R6_SIM_FAILURE', before: 'view', after: e.message.slice(0, 160), ok: false }], { simRpc: rpc })
@@ -366,26 +447,75 @@ async function pollLoop() {
       log.warn(`poll: ${e.message.slice(0, 200)}`)
     }
     checkFinality()
-    await sleep(Math.max(0, cfg.pollMs - (Date.now() - t)))
+    // If the read chain had to fall back to a simulation provider (official endpoint, 15 req/s per
+    // IP shared by all three sentinels and their simulations), poll at most once a second there.
+    const period = cfg.simRpcs.includes(main.url) && cfg.simRpcs.length > 1 ? Math.max(cfg.pollMs, 1_000) : cfg.pollMs
+    await sleep(Math.max(0, period - (Date.now() - t)))
   }
 }
 
 // ---------------------------------------------------------------- detection path 2: WebSocket
+// getLogs polling (path 1) always runs, so a dead WS only costs the WS path. Reconnects back off
+// exponentially with jitter (500 ms -> 15 s), rotate over WS_URL + WS_FALLBACKS, and the backoff
+// resets only after a connection stayed up for 10 s (no tight loop on a flapping endpoint). A socket
+// that never opens (stuck TLS) is closed after WS_CONNECT_TIMEOUT_MS; one that goes silent (no head
+// for WS_STALE_MS) is treated as dead.
 function startWs() {
-  if (!cfg.wsUrl) return
+  if (!cfg.wsUrls.length) return
   let backoff = 500
-  let subLogs = null
-  let subHeads = null
+  let urlIdx = 0
+  state.wsReconnects = 0
   const connect = () => {
-    const ws = new WebSocket(cfg.wsUrl)
+    const url = cfg.wsUrls[urlIdx % cfg.wsUrls.length]
+    let ws
+    try {
+      ws = new WebSocket(url)
+    } catch (e) {
+      log.warn(`ws ${url.replace(/^wss?:\/\//, '').split('/')[0]}: ${e.message}`)
+      return scheduleReconnect()
+    }
+    let subLogs = null
+    let subHeads = null
+    let openedAt = 0
+    let lastMsg = Date.now()
+    let closed = false
+    const connectTimer = setTimeout(() => {
+      if (!openedAt) {
+        log.warn(`ws connect timeout after ${cfg.wsConnectTimeoutMs} ms`)
+        try { ws.close() } catch {}
+        onGone()
+      }
+    }, cfg.wsConnectTimeoutMs)
+    const staleTimer = setInterval(() => {
+      if (openedAt && Date.now() - lastMsg > cfg.wsStaleMs) {
+        log.warn(`ws silent for ${Date.now() - lastMsg} ms, reconnecting`)
+        try { ws.close() } catch {}
+        onGone()
+      }
+    }, 1_000)
+    function onGone() {
+      if (closed) return
+      closed = true
+      clearTimeout(connectTimer)
+      clearInterval(staleTimer)
+      const wasUp = openedAt ? Date.now() - openedAt : 0
+      state.wsConnected = false
+      if (wasUp >= 10_000) backoff = 500
+      else urlIdx++ // never got going here: try the next WS endpoint next time
+      scheduleReconnect()
+    }
     ws.onopen = () => {
+      openedAt = Date.now()
+      lastMsg = Date.now()
+      clearTimeout(connectTimer)
       state.wsConnected = true
-      backoff = 500
+      state.wsUrlLabel = url.replace(/^wss?:\/\//, '').split('/')[0]
       ws.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_subscribe', params: [cfg.wsLogsKind, { address: D.guardedAdmin, topics: [PROPOSED_TOPIC] }] }))
       ws.send(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'eth_subscribe', params: [cfg.wsHeadsKind] }))
-      log.info(`ws connected (${cfg.wsLogsKind} + ${cfg.wsHeadsKind})`)
+      log.info(`ws connected to ${state.wsUrlLabel} (${cfg.wsLogsKind} + ${cfg.wsHeadsKind})`)
     }
     ws.onmessage = (m) => {
+      lastMsg = Date.now()
       let msg
       try {
         msg = JSON.parse(typeof m.data === 'string' ? m.data : Buffer.from(m.data).toString())
@@ -403,13 +533,14 @@ function startWs() {
         state.lastWsHead = Date.now()
       }
     }
-    ws.onclose = () => {
-      state.wsConnected = false
-      subLogs = subHeads = null
-      setTimeout(connect, backoff)
-      backoff = Math.min(backoff * 2, 5_000)
-    }
+    ws.onclose = () => onGone()
     ws.onerror = () => {}
+  }
+  function scheduleReconnect() {
+    const wait = Math.round(backoff * (0.75 + Math.random() * 0.5))
+    backoff = Math.min(backoff * 2, 15_000)
+    state.wsReconnects++
+    setTimeout(connect, wait)
   }
   connect()
 }
@@ -425,6 +556,8 @@ async function refreshViews() {
     if (state.nextId == null || Number(n) > state.nextId) state.nextId = Number(n)
     await vetoer.presign(state.nextId)
     for (const h of D.holders.slice(0, 1)) state.holderBalance.set(h, BigInt(await ethCall(D.proxy, abis.token, 'balanceOf', [h])))
+    implCache.at = 0 // re-read the ERC-1967 slot so an executed upgrade shows up within one refresh
+    await currentImplSelectors()
   } catch (e) {
     log.warn(`view refresh: ${e.message.slice(0, 160)}`)
   }
@@ -433,17 +566,19 @@ async function refreshViews() {
 // ---------------------------------------------------------------- start
 await server.listen()
 // Warm every connection before the first proposal arrives (new TLS connections are slow).
-await Promise.allSettled([main, ...sims, ...broadcastRpcs].map((r) => r.call('eth_chainId')))
+await Promise.allSettled(allClients().map((r) => r.call('eth_chainId')))
 await retry(() => vetoer.init(), { log, what: 'signer init' })
 const isG = await ethCall(D.guardedAdmin, abis.guardedAdmin, 'isGuardian', [account.address]).catch(() => null)
 if (isG === false) log.warn(`${account.address} is NOT a guardian of ${D.guardedAdmin}: vetoes will revert`)
 await refreshViews()
 setInterval(refreshViews, 5_000)
-if (cfg.simKeepaliveMs > 0) setInterval(() => sims.forEach((s) => s.call('eth_chainId').catch(() => {})), cfg.simKeepaliveMs)
+// Every client that is not already busy gets an eth_chainId when it has been idle for KEEPALIVE_MS
+// (the polled primary never is). Budget: 1 request per provider per KEEPALIVE_MS per sentinel.
+keepWarm(allClients(), cfg.keepaliveMs)
 setInterval(() => emit('heartbeat', { lastBlock: state.lastBlock, rpc: main.label, ok: healthy() }), cfg.heartbeatMs)
 startWs()
 pollLoop()
-log.info(`up: guardedAdmin=${D.guardedAdmin} proxy=${D.proxy} sse=:${cfg.ssePort} rpc=${main.label} sim=[${simOrder.map((s) => s.label).join(', ')}] ws=${cfg.wsUrl ? 'on' : 'off'} strict=${cfg.strict} attach=${cfg.attach}`)
+log.info(`up: guardedAdmin=${D.guardedAdmin} proxy=${D.proxy} sse=:${cfg.ssePort} read=[${readClients.map((c) => c.label).join(' > ')}] sim=[${simOrder.map((s) => s.label).join(', ')}] ws=${cfg.wsUrls.length ? 'on' : 'off'} keepalive=${cfg.keepaliveMs} strict=${cfg.strict} attach=${cfg.attach}`)
 
 const shutdown = async () => {
   vetoer.stop()

@@ -1,11 +1,11 @@
 // 战情室画面（1280×720 固定舞台，按视窗等比缩放）。
 // 每个区块只在内容变化时才重写 innerHTML，翻牌动画只播一次。
-import { formatEther } from 'viem'
 import { blocks, STAGE_CN } from './chain'
 import { CONFIG } from './config'
+import { blockFontPx, explorerUrl, fmtGwei, fmtMon, plausibleBlockMs, reportAutoVisible, vetoMetrics } from './derive'
 import { CHAIN, HAS_COMMIT_STATE, LOCAL_TAG, MODE, SENTINELS } from './runtime'
 import { short, store, type Proposal, type SentinelOnProposal } from './store'
-import { CARDS, KIND_TEXT, RULE_TEXT, toBig, type CardId, type CardInfo } from './types'
+import { CARDS, KIND_TEXT, RULE_TEXT, type CardId, type CardInfo } from './types'
 
 const $ = (id: string) => document.getElementById(id)!
 const prev = new Map<string, string>()
@@ -21,10 +21,23 @@ export function esc(s: unknown): string {
 
 const tag = () => (LOCAL_TAG ? `<span class="loc">${LOCAL_TAG}</span>` : '')
 
-function txLink(h: string | undefined | null, n = 6): string {
-  if (!h) return '—'
-  if (CHAIN.explorerTx && MODE === 'testnet') return `<a href="${esc(CHAIN.explorerTx + h)}" target="_blank" rel="noreferrer">${esc(short(h, n))}</a>`
-  return `<span class="mono">${esc(short(h, n))}</span>`
+/** 测试网模式才连到浏览器（假事件的哈希是编的，本机没有浏览器） */
+function linkTo(base: string | null, v: string | undefined | null, n: number, cls = 'mono'): string {
+  if (!v) return '—'
+  const url = MODE === 'testnet' ? explorerUrl(base, v) : null
+  if (url) return `<a class="${cls} xl" href="${esc(url)}" target="_blank" rel="noopener noreferrer" title="${esc(v)}">${esc(short(v, n))}<span class="xl-i">↗</span></a>`
+  return `<span class="${cls}" title="${esc(v)}">${esc(short(v, n))}</span>`
+}
+const txLink = (h: string | undefined | null, n = 6) => linkTo(CHAIN.explorerTx, h, n)
+const addrLink = (a: string | undefined | null, n = 6) => linkTo(CHAIN.explorerAddr, a, n)
+
+/** Sourcify 徽章：只在查验确认后显示；未验证的（攻击实现）明说「未开源」 */
+function verifyChip(addr: string | undefined | null, showNo = false): string {
+  if (!addr || MODE !== 'testnet') return ''
+  const st = store.verified.get(addr.toLowerCase())
+  if (st === 'yes') return `<span class="vchip yes" title="Sourcify exact match">✓ 已验证</span>`
+  if (st === 'no' && showNo) return `<span class="vchip no" title="Sourcify 查无原始码">未开源</span>`
+  return ''
 }
 
 export function mountSkeleton() {
@@ -32,15 +45,14 @@ export function mountSkeleton() {
   <div id="stage">
     <header id="top">
       <div class="top-left">
-        <div id="badge"></div>
+        <div class="badge-row"><span id="badge"></span><span id="ga" class="ga"></span></div>
         <div class="title">十一秒 <span>Eleven Seconds · 升级冷静期＋哨兵否决</span></div>
         <div id="link" class="link"></div>
       </div>
       <div id="toolbar" class="toolbar"></div>
       <div class="top-right">
-        <div class="blk-label">当前区块 <span id="blk-tag"></span></div>
+        <div class="blk-meta"><span class="blk-label">当前区块 <span id="blk-tag"></span></span><span id="bt" class="bt"></span></div>
         <div id="blk" class="blk">—</div>
-        <div id="bt" class="bt"></div>
       </div>
     </header>
     <main>
@@ -58,7 +70,7 @@ export function mountSkeleton() {
     </main>
     <section id="metrics"></section>
     <section id="stream"></section>
-    <div id="ov-report" class="float hidden"></div>
+    <div id="ov-report" class="dock hidden"></div>
     <div id="ov-judge" class="overlay hidden"></div>
     <div id="ov-table" class="overlay hidden"></div>
   </div>`
@@ -75,6 +87,9 @@ function fitStage() {
 }
 
 // ---------- 顶部 ----------
+/** 右上角栏位宽度（与 style.css #top 第三栏一致）与区块数字最大字号 */
+const BLK_WIDTH = 396
+const BLK_MAX_PX = 84
 function renderTop() {
   const badge =
     MODE === 'testnet'
@@ -92,10 +107,16 @@ function renderTop() {
           ? '内建假事件播放器'
           : '✕ 链连线中断'
   patch('link', esc(linkText))
-  patch('blk', blocks.latest ? `#${blocks.latest.toLocaleString('en-US')}` : '—')
+  // 守门合约地址（driver /deployments 提供；测试网可点、Sourcify 查验后加徽章）
+  const ga = store.deploy?.guardedAdmin
+  patch('ga', ga ? `<span class="ga-l" title="GuardedAdmin">守门合约 ${verifyChip(ga)}</span><span class="ga-a">${addrLink(ga, 6)} ${tag()}</span>` : '')
+  const blkText = blocks.latest ? `#${blocks.latest.toLocaleString('en-US')}` : '—'
+  if (prev.get('blk') !== blkText) $('blk').style.fontSize = `${blockFontPx(blkText, BLK_WIDTH, BLK_MAX_PX)}px`
+  patch('blk', blkText)
   patch('blk-tag', tag())
-  const bt = blocks.blockTimeMs()
-  patch('bt', bt ? `实测 ${(bt / 1000).toFixed(2)} 秒/块 ${tag()}` : '测量出块时间中…')
+  const raw = blocks.blockTimeMs()
+  const bt = plausibleBlockMs(raw, CONFIG.minPlausibleBlockMs)
+  patch('bt', bt ? `· 实测 ${(bt / 1000).toFixed(2)} 秒/块` : raw !== null ? '· 快进挖块中，不计秒/块' : '· 测量出块时间中…')
   patch(
     'toolbar',
     `<button data-act="judge">J 评委出题</button><button data-act="table">T 30 块对照</button><button data-act="report">R AI 报告</button>` +
@@ -165,7 +186,7 @@ function renderAttacker(p: Proposal | null) {
     `<div class="pc">
       <div class="pc-main">
         <div class="pc-title">提案 #${esc(p.id)} · ${esc(kind)}${p.dropped ? ' <span class="bad">⚠ log 已消失</span>' : ''}</div>
-        <div class="pc-row">新实现 <span class="mono">${esc(short(p.target, 8))}</span>${showName ? ` <b>${esc(c!.name)}</b>` : ''}</div>
+        <div class="pc-row">新实现 ${addrLink(p.target, 8)}${showName ? ` <b>${esc(c!.name)}</b>` : ''}${revealed(p) ? ` ${verifyChip(p.target, true)}` : ''}</div>
         <div class="pc-row">codehash <span class="mono">${esc(short(p.codehash, 8))}</span></div>
         <div class="pc-row">提案块 <b>#${p.proposeBlock ?? '?'}</b> → 可执行块 <b>#${p.readyBlock ?? '?'}</b> ${tag()}</div>
       </div>
@@ -253,31 +274,13 @@ function renderSentinel(s: string, p: Proposal | null, now: number) {
 }
 
 // ---------- 大字实测值 ----------
-function firstReceipt(p: Proposal) {
-  let best: SentinelOnProposal['receipt'] | null = null
-  let who = ''
-  for (const s of SENTINELS) {
-    const r = p.sentinels[s]?.receipt
-    if (!r || r.block === null) continue
-    if (!best || (r.block ?? 0) < (best.block ?? 0) || (r.block === best.block && (r.latencyMs ?? 1e12) < (best.latencyMs ?? 1e12))) {
-      best = r
-      who = s
-    }
-  }
-  return best ? { r: best, who } : null
-}
-
-function vetoCount(p: Proposal) {
-  return SENTINELS.filter((s) => p.sentinels[s]?.receipt).length
-}
-
+// 全部取自最先落地那张 veto_receipt（derive.vetoMetrics）；拿不到就显示等待，不用任何预设值。
 function renderMetrics(p: Proposal | null) {
   if (!p) {
     patch('metrics', `<div class="m-empty">否决用了 <b>?</b> 块 ／ 攻击者还要等 <b>?</b> 块 <small>（全部显示实测值）</small></div>`)
     return
   }
   const v = verdictOf(p)
-  const fr = firstReceipt(p)
   if (v.verdict === 'pass') {
     const left = p.readyBlock ? Math.max(0, p.readyBlock - blocks.latest) : null
     patch(
@@ -288,24 +291,23 @@ function renderMetrics(p: Proposal | null) {
     )
     return
   }
-  if (fr && p.proposeBlock && p.readyBlock && fr.r.block) {
-    const used = fr.r.block - p.proposeBlock
-    const wait = p.readyBlock - fr.r.block
-    const lim = toBig(fr.r.gasLimit)
-    const price = toBig(fr.r.effectiveGasPrice)
+  const m = vetoMetrics(p, SENTINELS)
+  if (m) {
     let cost = '—'
-    let usd = ''
-    if (lim !== null && price !== null) {
-      const wei = lim * price
-      const mon = Number(formatEther(wei))
-      cost = `${mon.toPrecision(3)} MON`
-      usd = CONFIG.monUsd.rate !== null ? `≈ $${(mon * CONFIG.monUsd.rate).toPrecision(3)}（汇率 ${esc(CONFIG.monUsd.date || '未注明日期')}，操作者手填）` : '美元汇率未设定'
+    let costSub = '收据缺 gasLimit 或 effectiveGasPrice'
+    if (m.costWei !== null && m.gasLimit !== null && m.priceWei !== null) {
+      cost = fmtMon(m.costWei)
+      const mon = Number(m.costWei) / 1e18
+      costSub = `收据实测 gasLimit ${m.gasLimit.toLocaleString('en-US')} × ${fmtGwei(m.priceWei)}`
+      if (CONFIG.monUsd.rate !== null) costSub += ` · ≈ $${(mon * CONFIG.monUsd.rate).toPrecision(3)}（汇率 ${esc(CONFIG.monUsd.date || '未注明日期')}，操作者手填）`
     }
+    const who = m.who.split('-')[1] ?? m.who
+    const lat = m.latencyMs !== null ? ` ${(m.latencyMs / 1000).toFixed(2)} 秒` : ''
     patch(
       'metrics',
-      `<div class="tile bad"><div class="t-l">否决用了</div><div class="t-v"><b>${used}</b> 块 ${tag()}</div><div class="t-s">哨兵 ${esc(fr.who.split('-')[1] ?? fr.who)} 最先落地 · ${vetoCount(p)}/3 已否决</div></div>
-       <div class="tile"><div class="t-l">攻击者还要等</div><div class="t-v"><b>${wait}</b> 块 ${tag()}</div><div class="t-s">等到了也只会拿到 ProposalVetoed</div></div>
-       <div class="tile"><div class="t-l">单次否决成本 <small>gasLimit × effectiveGasPrice</small></div><div class="t-v">${esc(cost)} ${tag()}</div><div class="t-s">${usd}</div></div>`,
+      `<div class="tile bad"><div class="t-l">否决用了 <small>提案块 → 否决收据块</small></div><div class="t-v"><b>${m.usedBlocks}</b> 块 ${tag()}</div><div class="t-s">哨兵 ${esc(who)} 最先落地${lat} · 块 #${m.block} · ${m.vetoCount}/3 已否决</div></div>
+       <div class="tile"><div class="t-l">攻击者还要等 <small>否决块 → 可执行块</small></div><div class="t-v"><b>${m.waitBlocks}</b> 块 ${tag()}</div><div class="t-s">等到了也只会拿到 ProposalVetoed</div></div>
+       <div class="tile"><div class="t-l">单次否决成本 <small>gasLimit × effectiveGasPrice</small></div><div class="t-v">${esc(cost)} ${tag()}</div><div class="t-s">${costSub}</div></div>`,
     )
     return
   }
@@ -315,11 +317,17 @@ function renderMetrics(p: Proposal | null) {
 
 // ---------- 事件串流 ----------
 const SRC_CN: Record<string, string> = { 'sentinel-1': '哨兵1', 'sentinel-2': '哨兵2', 'sentinel-3': '哨兵3', driver: 'driver', reporter: '报告' }
-function renderStream() {
+function renderStream(p: Proposal | null, docked: boolean) {
   const lines = store.stream.slice(-6)
+  // 报告浮层收起时，在串流标题右边留一个提示，按 R 可再打开
+  const chip =
+    !docked && p && p.report.text
+      ? `<span class="st-chip">AI 报告 #${esc(p.id)} ${p.report.done ? '✓ 已收起' : '生成中'}${p.report.attachTx ? ` · attachReason ${txLink(p.report.attachTx, 4)}` : ''} · 按 R 展开</span>`
+      : ''
+  $('stream').classList.toggle('docked', docked)
   patch(
     'stream',
-    `<div class="st-title">事件串流 <small>3 个哨兵 · driver · reporter（SSE）${MODE === 'fake' ? ' · 假事件' : ''}</small></div>` +
+    `<div class="st-title">事件串流 <small>3 个哨兵 · driver · reporter（SSE）${MODE === 'fake' ? ' · 假事件' : ''}</small>${chip}</div>` +
       lines
         .map((l) => {
           const d = new Date(l.ts)
@@ -331,33 +339,33 @@ function renderStream() {
   )
 }
 
-// ---------- S2 AI 报告浮层 ----------
+// ---------- S2 AI 报告浮层（右下角停靠，只盖事件串流的右半边，不挡哨兵卡与实测数字） ----------
 export const ui = { reportOpen: false, judgeOpen: false, tableOpen: false, reportDismissedFor: '' }
 
-export function reportVisible(): boolean {
-  const p = store.active
-  return ui.reportOpen || (!!p && p.report.open && ui.reportDismissedFor !== p.id && p.report.text.length > 0)
+/** 手动打开（R）就一直显示；否则串流中自动显示，完成后 CONFIG.reportAutoCloseMs 自动收起 */
+export function reportVisible(now = Date.now()): boolean {
+  return ui.reportOpen || reportAutoVisible(store.active, ui.reportDismissedFor, now, CONFIG.reportAutoCloseMs)
 }
 
-function renderReport(p: Proposal | null) {
+function renderReport(p: Proposal | null, show: boolean) {
   const el = $('ov-report')
-  const show = reportVisible()
   el.classList.toggle('hidden', !show)
+  el.classList.toggle('manual', ui.reportOpen)
   if (!show) return
   if (!p || !p.report.text) {
-    patch('ov-report', `<div class="r-head">AI 风险报告</div><div class="r-body dim">本提案还没有报告。</div>`)
+    patch('ov-report', `<div class="r-head">AI 风险报告<button data-act="close-report" title="R 收起">✕</button></div><div class="r-body dim"><div>本提案还没有报告。</div></div>`)
     return
   }
   const r = p.report
+  const left = r.done && r.doneTs !== undefined && !ui.reportOpen ? Math.max(0, Math.ceil((CONFIG.reportAutoCloseMs - (Date.now() - r.doneTs)) / 1000)) : null
+  const attach = r.attachTx
+    ? `${txLink(r.attachTx)}${r.reportHash && r.hash && r.reportHash.toLowerCase() !== r.hash.toLowerCase() ? ' <span class="bad">⚠ 链上哈希不符</span>' : r.reportHash ? ' <span class="good">✓ 链上哈希一致</span>' : ''}`
+    : '<span class="dim">等待哨兵 1 代送…</span>'
   patch(
     'ov-report',
-    `<div class="r-head">AI 风险报告 · 提案 #${esc(p.id)} ${r.cached ? '<span class="tpl">模板</span>' : '<span class="ai">本机 Qwen</span>'}<button data-act="close-report">✕</button></div>
-     <div class="r-note">AI 不在否决路径上，只给人类多签参考</div>
-     <div class="r-body">${esc(r.text)}${r.done ? '' : '<span class="caret">▌</span>'}</div>
-     <div class="r-foot">
-       <div>报告哈希 ${r.hash ? `<span class="mono">${esc(short(r.hash, 10))}</span>` : '<span class="dim">生成中…</span>'}</div>
-       <div>attachReason ${r.attachTx ? txLink(r.attachTx) + (r.reportHash && r.hash && r.reportHash.toLowerCase() !== r.hash.toLowerCase() ? ' <span class="bad">⚠ 链上哈希不符</span>' : r.reportHash ? ' <span class="good">✓ 链上哈希一致</span>' : '') : '<span class="dim">等待哨兵 1 代送…</span>'}</div>
-     </div>`,
+    `<div class="r-head">AI 风险报告 · #${esc(p.id)} ${r.cached ? '<span class="tpl">模板</span>' : '<span class="ai">本机 Qwen</span>'}<span class="r-note">不在否决路径上，只给多签参考</span>${left !== null ? `<span class="r-left">${left} 秒后收起</span>` : ''}<button data-act="close-report" title="R 收起">✕</button></div>
+     <div class="r-body"><div>${esc(r.text)}${r.done ? '' : '<span class="caret">▌</span>'}</div></div>
+     <div class="r-foot"><span>报告哈希 ${r.hash ? `<span class="mono">${esc(short(r.hash, 6))}</span>` : '<span class="dim">生成中…</span>'}</span><span>attachReason ${attach}</span></div>`,
   )
 }
 
@@ -412,15 +420,21 @@ function renderTable() {
   const el = $('ov-table')
   el.classList.toggle('hidden', !ui.tableOpen)
   if (!ui.tableOpen) return
-  const n = CONFIG.delayBlocks
-  const bt = blocks.blockTimeMs()
+  // 冷静期块数：优先用当前提案链上的 readyBlock − proposeBlock，其次部署资讯，最后才用设定档
+  const ap = store.active
+  const onchain = ap && ap.readyBlock && ap.proposeBlock ? ap.readyBlock - ap.proposeBlock : null
+  const n = onchain ?? store.deploy?.delayBlocks ?? CONFIG.delayBlocks
+  const raw = blocks.blockTimeMs()
+  const bt = plausibleBlockMs(raw, CONFIG.minPlausibleBlockMs)
   const fmt = (sec: number) => (sec >= 60 ? `约 ${(sec / 60).toFixed(1)} 分钟` : `约 ${sec.toFixed(1)} 秒`)
   const rows = CONFIG.referenceChains
     .map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.note)}</td><td><b>${fmt(r.blockSec * n)}</b></td><td class="dim">参考值</td></tr>`)
     .join('')
+  // Monad 一行永远用本页量到的秒/块（最近 blockTimeWindow 块的到达时间），不用任何参考值
+  const samples = blocks.sampleBlocks()
   const monad = bt
-    ? `<tr class="hl"><td>Monad${MODE === 'testnet' ? ' 测试网' : ''}</td><td>${(bt / 1000).toFixed(2)} 秒/块</td><td><b>${fmt((bt / 1000) * n)}</b></td><td>${MODE === 'testnet' ? '本页实测' : `${LOCAL_TAG}实测（不是测试网）`}</td></tr>`
-    : `<tr class="hl"><td>Monad</td><td colspan="3">测量中…</td></tr>`
+    ? `<tr class="hl"><td>Monad${MODE === 'testnet' ? ' 测试网' : ''}</td><td>${(bt / 1000).toFixed(2)} 秒/块</td><td><b>${fmt((bt / 1000) * n)}</b></td><td>${MODE === 'testnet' ? '本页实测' : `${LOCAL_TAG}实测（不是测试网）`}<div class="t-n">最近 ${samples} 块</div></td></tr>`
+    : `<tr class="hl"><td>Monad</td><td colspan="3">${raw !== null ? '本机快进挖块中，秒/块不计' : '测量中…'}</td></tr>`
   patch(
     'ov-table',
     `<div class="ov-box">
@@ -438,8 +452,9 @@ export function render() {
   renderAttacker(p)
   for (const s of SENTINELS) renderSentinel(s, p, now)
   renderMetrics(p)
-  renderStream()
-  renderReport(p)
+  const docked = reportVisible(now)
+  renderStream(p, docked)
+  renderReport(p, docked)
   renderJudge()
   renderTable()
 }

@@ -23,6 +23,8 @@ export interface SentinelOnProposal {
     gasLimit: unknown
     effectiveGasPrice: unknown
     latencyMs: number | null
+    /** 哨兵在收据事件 extra 里附的实测值（vetoBlocksAfterPropose、blocksLeftForAttacker） */
+    extra?: Record<string, unknown>
   }
   finalizedBlock?: number | null
 }
@@ -41,7 +43,7 @@ export interface Proposal {
   dropped?: boolean
   sentinels: Record<string, SentinelOnProposal>
   execute?: { txHash?: string; result?: string; error?: string | null; extra?: Record<string, unknown>; ts: number }
-  report: { text: string; done: boolean; hash?: string; cached?: boolean; attachTx?: string; reportHash?: string; open: boolean }
+  report: { text: string; done: boolean; hash?: string; cached?: boolean; attachTx?: string; reportHash?: string; open: boolean; doneTs?: number }
 }
 
 export interface SourceHealth {
@@ -72,6 +74,17 @@ function loadSeen(): Set<string> {
   }
 }
 
+/** driver /deployments 给的部署资讯（前端不写死地址） */
+export interface DeployInfo {
+  guardedAdmin?: string
+  proxy?: string
+  delayBlocks?: number
+  chainId?: number
+}
+
+/** Sourcify 查验结果：yes＝exact/match；no＝查得到但没验证；err＝网络失败（画面不下结论） */
+export type VerifyState = 'pending' | 'yes' | 'no' | 'err'
+
 export class Store {
   readonly loadTs = Date.now()
   proposals = new Map<string, Proposal>()
@@ -90,6 +103,8 @@ export class Store {
   /** 评委出题送出中：下一个建立的提案是蒙牌 */
   pendingJudge = false
   mixWarned = false
+  deploy: DeployInfo | null = null
+  verified = new Map<string, VerifyState>()
 
   onChange(fn: () => void) {
     this.listeners.add(fn)
@@ -264,6 +279,7 @@ export class Store {
             gasLimit: e.gasLimit,
             effectiveGasPrice: e.effectiveGasPrice,
             latencyMs: typeof e.latencyMs === 'number' ? e.latencyMs : null,
+            extra: e.extra && typeof e.extra === 'object' ? e.extra : undefined,
           }
         }
         this.log(source, e.type, `否决收据 #${id}：块 ${toNum(e.block) ?? '?'}，状态 ${e.status}，耗时 ${e.latencyMs ?? '?'} ms（收据≠终局）`, 'bad', ts)
@@ -299,6 +315,8 @@ export class Store {
         p.report.cached = !!e.cached
         p.report.done = true
         p.report.open = true
+        // 用本机收到的时间算自动收起，避免各进程时钟不同步
+        p.report.doneTs = Date.now()
         this.log(source, e.type, `AI 报告完成 #${id}${e.cached ? '（模板）' : ''} hash ${short(e.hash)}`, 'info', ts)
         break
     }
