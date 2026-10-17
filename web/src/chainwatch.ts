@@ -8,7 +8,7 @@ import { decodeEventLog, decodeFunctionResult, encodeFunctionData, numberToHex, 
 import { blocks } from './chain'
 import { DATA } from './chaindata'
 import { msg } from './i18n'
-import { CHAIN, SENTINELS } from './runtime'
+import { ARENA, CHAIN, SENTINELS } from './runtime'
 import { short, store, type Proposal } from './store'
 import type { CardId } from './types'
 import { AutoReplay, type ReplayFrame, type Timeline, type TLStep } from './replay'
@@ -441,6 +441,9 @@ function logReplayStep(tl: Timeline, st: TLStep, src: Proposal) {
 }
 
 export const replay = new AutoReplay(Date.now(), logReplayStep)
+// arena 是让人自己按攻击的页面：开页不自动回放（停在最近一个提案的最终状态），按 P 才重播，
+// 免得看起来像有攻击在自动进行。云端只读版照旧自动回放。
+if (ARENA) replay.paused = true
 const reducedMotion = () => {
   try {
     return window.matchMedia('(prefers-reduced-motion: reduce)').matches

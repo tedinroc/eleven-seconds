@@ -58,7 +58,7 @@ for (const l of ['zh-CN', 'zh-TW', 'en'] as Lang[]) {
 }
 setLang('zh-CN', false)
 
-// ---------- 3. 自动回放：有人按攻击立刻切回即时 ----------
+// ---------- 3. 回放：开页不自动播，按 P 才播；有人按攻击立刻切回即时 ----------
 {
   const p = ensure('3')
   p.kind = '0'
@@ -69,7 +69,10 @@ setLang('zh-CN', false)
   p.sentinels['sentinel-1'] = { verdict: 'veto', rule: 'R1_TOTAL_SUPPLY', vetoTx: TX, receipt: { txHash: TX, block: 1009, status: 'success', gasUsed: '123112', gasLimit: '123112', effectiveGasPrice: '102000000000', latencyMs: null } }
   chainHealth.loadedRecent = true
   tickReplay(Date.now() + 9000)
-  ok(replay.active, '回放：开页闲置后自动回放链上被否决的攻击')
+  ok(!replay.active && replay.paused, '回放：arena 开页不自动回放（停在最终状态，免得像有攻击在自动进行）')
+  replay.toggle(Date.now())
+  tickReplay(Date.now())
+  ok(replay.active, '回放：按 P 才重播链上被否决的攻击')
 }
 
 // ---------- 4. 按攻击：200 → 已送出 #id ----------
