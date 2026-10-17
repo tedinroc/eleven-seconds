@@ -43,8 +43,8 @@ export interface Proposal {
   judge?: boolean
   dropped?: boolean
   sentinels: Record<string, SentinelOnProposal>
-  execute?: { txHash?: string; result?: string; error?: string | null; extra?: Record<string, unknown>; ts: number }
-  report: { text: string; done: boolean; hash?: string; cached?: boolean; attachTx?: string; reportHash?: string; open: boolean; doneTs?: number }
+  execute?: { txHash?: string; result?: string; error?: string | null; extra?: Record<string, unknown>; ts: number; /** chain 模式：Executed log 所在块 */ block?: number }
+  report: { text: string; done: boolean; hash?: string; cached?: boolean; attachTx?: string; reportHash?: string; open: boolean; doneTs?: number; /** chain 模式：ReasonAttached log 所在块 */ attachBlock?: number }
   /** 只有 ?mode=chain：getProposal 读到的链上状态（status 0 None／1 Pending／2 Vetoed／3 Executed） */
   chain?: { status: number; statusName: string; vetoCount: number; proposer: string; readTs: number }
 }
@@ -66,6 +66,8 @@ export interface StreamLine {
   /** 模板 key＋参数：画面按当前语言重新套模板；没有就显示 text（见 i18n.tLegacy） */
   msg?: Msg
   level: 'info' | 'good' | 'bad' | 'warn'
+  /** chain 模式自动回放产生的句子（画面加「回放」前缀） */
+  replay?: boolean
 }
 
 const LS_KEY = `eleven.seen.${MODE}`
@@ -149,8 +151,8 @@ export class Store {
   }
 
   /** 事件串流一句：存模板（换语言时重画），text 留 zh-CN 原文 */
-  logT(source: string, type: string, m: Msg, level: StreamLine['level'] = 'info', ts = Date.now()) {
-    this.stream.push({ ts, source, type, text: tIn('zh-CN', m.k, m.p), msg: m, level })
+  logT(source: string, type: string, m: Msg, level: StreamLine['level'] = 'info', ts = Date.now(), replay = false) {
+    this.stream.push({ ts, source, type, text: tIn('zh-CN', m.k, m.p), msg: m, level, ...(replay ? { replay } : {}) })
     if (this.stream.length > 80) this.stream.shift()
   }
 

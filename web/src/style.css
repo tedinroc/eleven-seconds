@@ -1510,3 +1510,50 @@ html.layout-stack .bar > .seg {
     flex-basis: calc(50% - 2px);
   }
 }
+
+/* ---------- ?mode=chain 链上真实事件自动回放（replay.ts） ---------- */
+.rp-pill {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 8px;
+  border-radius: 5px;
+  background: var(--warn);
+  color: #111;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 22px;
+  vertical-align: 3px;
+}
+.rp-vb {
+  margin-left: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--warn);
+}
+.ln .rp-tag {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--warn);
+  color: #111;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 15px;
+  vertical-align: 1px;
+}
+.toolbar button.rp-btn.paused {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+html.layout-stack #h-att {
+  white-space: normal;
+}
+html.layout-stack .rp-pill {
+  font-size: 14px;
+  line-height: 20px;
+  vertical-align: 2px;
+}
+.toolbar button.rp-btn {
+  padding: 5px 8px;
+}

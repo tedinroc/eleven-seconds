@@ -249,6 +249,19 @@ const ZH_CN = {
   'mt.proposeFail': '提案失败：{msg}',
   'mt.approved': 'approver 已核准 v2 codehash {c} tx {tx}',
   'mt.approveFail': '核准失败：{msg}',
+  // chain 模式：链上真实事件自动回放（replay.ts）
+  'rp.pill': '回放 · 链上真实数据 · 提案 #{id}（区块 {b}）',
+  'rp.paused': ' · 已暂停',
+  'rp.prefix': '回放',
+  'rp.vblock': '回放 #{b}',
+  'rp.pause': 'P ⏸',
+  'rp.resume': 'P ▶',
+  'rp.pauseFull': '暂停回放',
+  'rp.resumeFull': '继续回放',
+  'rp.btnTitle': '自动回放链上真实事件（P 键）；收到即时提案会立刻停止',
+  'rp.ready': '冷静期满：链上状态 Vetoed，execute 只能 revert',
+  'rp.readyVetoed': '冷静期满 #{id}：块 {b}，链上状态 Vetoed，execute 只能 revert',
+  'rp.readyPassed': '冷静期满 #{id}：块 {b}，没有任何否决',
 }
 export type Key = keyof typeof ZH_CN
 
@@ -480,6 +493,18 @@ const ZH_TW: Record<Key, string> = {
   'mt.proposeFail': '提案失敗：{msg}',
   'mt.approved': 'approver 已核准 v2 codehash {c} tx {tx}',
   'mt.approveFail': '核准失敗：{msg}',
+  'rp.pill': '回放 · 鏈上真實資料 · 提案 #{id}（區塊 {b}）',
+  'rp.paused': ' · 已暫停',
+  'rp.prefix': '回放',
+  'rp.vblock': '回放 #{b}',
+  'rp.pause': 'P ⏸',
+  'rp.resume': 'P ▶',
+  'rp.pauseFull': '暫停回放',
+  'rp.resumeFull': '繼續回放',
+  'rp.btnTitle': '自動回放鏈上真實事件（P 鍵）；收到即時提案會立刻停止',
+  'rp.ready': '冷靜期滿：鏈上狀態 Vetoed，execute 只能 revert',
+  'rp.readyVetoed': '冷靜期滿 #{id}：塊 {b}，鏈上狀態 Vetoed，execute 只能 revert',
+  'rp.readyPassed': '冷靜期滿 #{id}：塊 {b}，沒有任何否決',
 }
 
 const EN: Record<Key, string> = {
@@ -710,6 +735,18 @@ const EN: Record<Key, string> = {
   'mt.proposeFail': 'Proposal failed: {msg}',
   'mt.approved': 'approver approved v2 codehash {c} tx {tx}',
   'mt.approveFail': 'Approve failed: {msg}',
+  'rp.pill': 'Replay · real on-chain data · #{id} (block {b})',
+  'rp.paused': ' · paused',
+  'rp.prefix': 'Replay',
+  'rp.vblock': 'replay #{b}',
+  'rp.pause': 'P ⏸',
+  'rp.resume': 'P ▶',
+  'rp.pauseFull': 'Pause replay',
+  'rp.resumeFull': 'Resume replay',
+  'rp.btnTitle': 'Auto-replay real on-chain events (P key); stops the moment a live proposal arrives',
+  'rp.ready': 'Cooldown over: on-chain status Vetoed, execute can only revert',
+  'rp.readyVetoed': 'Cooldown over #{id}: block {b}, on-chain status Vetoed, execute can only revert',
+  'rp.readyPassed': 'Cooldown over #{id}: block {b}, no veto at all',
 }
 
 // ---------- 依 id 查的表（规则、提案种类、卡片说明、阶段、链上状态、事件来源） ----------

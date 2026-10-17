@@ -4,13 +4,19 @@
 import { blocks } from './chain'
 import { CONFIG } from './config'
 import { blockFontPx, explorerUrl, fmtGwei, fmtMon, plausibleBlockMs, reportAutoVisible, vetoMetrics } from './derive'
-import { CARD_GUARDIAN, chainHealth, recentIds } from './chainwatch'
+import { CARD_GUARDIAN, chainHealth, recentIds, replay, replayFrame } from './chainwatch'
+import { replayStage, type ReplayFrame } from './replay'
 import { cycleLang, lang, LANG_LABEL, LANGS, onLangChange, ruleText, srcName, stageName, statusChip, statusText, t, tLegacy, tm, tOr } from './i18n'
 import { CHAIN, HAS_COMMIT_STATE, LOCAL_TAG, MODE, ON_TESTNET, READ_ONLY, SENTINELS } from './runtime'
 import { short, store, type Proposal, type SentinelOnProposal } from './store'
 import { CARDS, type CardId, type CardInfo } from './types'
 
 const $ = (id: string) => document.getElementById(id)!
+
+/** chain 模式自动回放中：攻击者／哨兵／大字指标用回放的虚拟区块；右上大区块号永远是真实最新区块 */
+let RF: ReplayFrame | null = null
+const curBlock = () => (RF ? RF.vblock : blocks.latest)
+const stageOfBlock = (b: number) => (RF ? replayStage(b, RF.vblock) : blocks.stageOf(b))
 const prev = new Map<string, string>()
 function patch(id: string, html: string): boolean {
   if (prev.get(id) === html) return false
@@ -122,7 +128,12 @@ function fitStage() {
 function renderStatic() {
   patch('ttl', `${t('title.main')} <span>${t('title.sub')}</span>`)
   patch('blk-l', t('blk.label'))
-  patch('h-att', `<span class="ico">☠</span> ${t('att.h')} <small>${t('att.sub')}</small>`)
+  patch(
+    'h-att',
+    RF
+      ? `<span class="ico">☠</span> ${t('att.h')} <span class="rp-pill">${t('rp.pill', { id: esc(RF.tl.id), b: RF.tl.proposeBlock.toLocaleString('en-US') })}${RF.paused ? t('rp.paused') : ''}</span>`
+      : `<span class="ico">☠</span> ${t('att.h')} <small>${t('att.sub')}</small>`,
+  )
   patch('h-sen', `<span class="ico">⛨</span> ${t('sen.h')} <small>${t('sen.sub')}</small>`)
 }
 
@@ -161,7 +172,7 @@ function renderTop() {
   const blkText = blocks.latest ? `#${blocks.latest.toLocaleString('en-US')}` : '—'
   if (prev.get('blk') !== blkText) $('blk').style.fontSize = `${blockFontPx(blkText, BLK_WIDTH, BLK_MAX_PX)}px`
   patch('blk', blkText)
-  patch('blk-tag', tag())
+  patch('blk-tag', `${tag()}${RF ? `<span class="rp-vb">${t('rp.vblock', { b: RF.vblock.toLocaleString('en-US') })}</span>` : ''}`)
   const raw = blocks.blockTimeMs()
   const bt = plausibleBlockMs(raw, CONFIG.minPlausibleBlockMs)
   patch('bt', bt ? t('bt.measured', { s: (bt / 1000).toFixed(2) }) : raw !== null ? t('bt.fast') : t('bt.measuring'))
@@ -172,12 +183,12 @@ function renderTop() {
         const p = store.proposals.get(id)!
         const st = p.chain?.status
         const cls = st === 2 ? 'bad' : st === 3 ? 'good' : ''
-        return `<button data-act="sel:${esc(id)}" class="${store.activeId === id ? 'on' : ''}"><b class="${cls}">#${esc(id)}</b> ${esc(st !== undefined ? statusChip(st) : '…')}</button>`
+        return `<button data-act="sel:${esc(id)}" class="${(RF ? RF.tl.id : store.activeId) === id ? 'on' : ''}"><b class="${cls}">#${esc(id)}</b> ${esc(st !== undefined ? statusChip(st) : '…')}</button>`
       })
       .join('')
     patch(
       'toolbar',
-      `<span class="ro">${t('tb.readonly')}</span><button data-act="table">${t('tb.table')}</button><button data-act="report">${t('tb.reportHash')}</button>${langButton()}` +
+      `<span class="ro">${t('tb.readonly')}</span><button data-act="table">${t('tb.table')}</button><button data-act="report">${t('tb.reportHash')}</button><button data-act="replay" class="rp-btn${replay.paused ? ' paused' : ''}" title="${esc(`${replay.paused ? t('rp.resumeFull') : t('rp.pauseFull')} · ${t('rp.btnTitle')}`)}" aria-label="${esc(replay.paused ? t('rp.resumeFull') : t('rp.pauseFull'))}">${replay.paused ? t('rp.resume') : t('rp.pause')}</button>${langButton()}` +
         (ids.length ? `<span class="hint">${t('tb.recent')}${chips}</span>` : `<span class="hint">${chainHealth.loadedRecent ? t('tb.noProposals') : t('tb.loadingRecent')}</span>`),
     )
     return
@@ -194,10 +205,10 @@ function renderTop() {
 function stageBar(block: number | null | undefined, floor = -1): string {
   if (!block) return `<div class="bar"><span class="seg off">${t('bar.waitChain')}</span></div>`
   if (!HAS_COMMIT_STATE) {
-    const ok = blocks.latest >= block
+    const ok = curBlock() >= block
     return `<div class="bar grey"><span class="seg ${ok ? 'on' : 'off'}">${ok ? t('bar.mined') : t('bar.waitBlock')} #${block}</span><span class="seg note">${t('bar.noStages')}</span></div>`
   }
-  const st = Math.max(blocks.stageOf(block), floor)
+  const st = Math.max(stageOfBlock(block), floor)
   return `<div class="bar">${[0, 1, 2, 3]
     .map((i) => {
       const cls = i <= st ? 'on' : i === st + 1 ? 'next' : 'off'
@@ -271,7 +282,7 @@ function renderAttacker(p: Proposal | null) {
   let cd = ''
   if (p.readyBlock && p.proposeBlock) {
     const total = Math.max(1, p.readyBlock - p.proposeBlock)
-    const left = Math.max(0, p.readyBlock - blocks.latest)
+    const left = Math.min(total, Math.max(0, p.readyBlock - curBlock()))
     const pct = Math.min(100, Math.round(((total - left) / total) * 100))
     const head = left > 0 ? t('cd.left', { n: left }) : t('cd.over', { n: total })
     const sub =
@@ -292,11 +303,13 @@ function renderAttacker(p: Proposal | null) {
   if (READ_ONLY && !p.execute) {
     const st = p.chain?.status
     ex =
-      st === 2
+      RF && st === 2 && p.readyBlock && curBlock() >= p.readyBlock
+        ? `<div class="exec bad"><span>✕ ${t('rp.ready')}</span><span class="sub">getProposal(${esc(p.id)}).vetoCount = ${p.chain!.vetoCount}</span></div>`
+        : st === 2
         ? `<div class="exec bad"><span>${t('ex.chainVetoed')}</span><span class="sub">getProposal(${esc(p.id)}).vetoCount = ${p.chain!.vetoCount}</span></div>`
         : st === 3
           ? `<div class="exec good"><span>${t('ex.chainExecuted')}</span><span class="sub">${t('ex.chainExecutedSub')}</span></div>`
-          : p.readyBlock && blocks.latest >= p.readyBlock
+          : p.readyBlock && curBlock() >= p.readyBlock
             ? `<div class="exec wait">${t('ex.chainReady', { b: p.readyBlock })}</div>`
             : `<div class="exec wait">${t('ex.notYet', { b: p.readyBlock ?? '?' })}</div>`
     patch('exec', ex)
@@ -310,7 +323,7 @@ function renderAttacker(p: Proposal | null) {
     } else {
       ex = `<div class="exec bad"><span>${t('ex.revert', { err: esc(p.execute.error ?? t('ex.unknownErr')) })}</span><span class="sub">${t('ex.revertTx', { tx: txLink(p.execute.txHash) })}</span></div>`
     }
-  } else if (p.readyBlock && blocks.latest >= p.readyBlock) {
+  } else if (p.readyBlock && curBlock() >= p.readyBlock) {
     ex = `<div class="exec wait">${t('ex.running')}</div>`
   } else {
     ex = `<div class="exec wait">${t('ex.notYet', { b: p.readyBlock ?? '?' })}</div>`
@@ -421,7 +434,7 @@ function renderMetrics(p: Proposal | null) {
   }
   const v = verdictOf(p)
   if (v.verdict === 'pass') {
-    const left = p.readyBlock ? Math.max(0, p.readyBlock - blocks.latest) : null
+    const left = p.readyBlock ? Math.max(0, p.readyBlock - curBlock()) : null
     const state =
       left === null
         ? '?'
@@ -489,7 +502,8 @@ function renderStream(p: Proposal | null, docked: boolean) {
           const ts = `${d.toLocaleTimeString('en-GB', { timeZone: 'Asia/Shanghai', hour12: false })}.${String(d.getMilliseconds()).padStart(3, '0')}`
           const ico = l.level === 'bad' ? '✕' : l.level === 'good' ? '✓' : l.level === 'warn' ? '!' : '·'
           const text = l.msg ? tm(l.msg) : tLegacy(l.text)
-          return `<div class="ln ${l.level}"><span class="t">${ts}</span><span class="src">${esc(srcName(l.source))}</span><span class="ico">${ico}</span>${esc(text)}</div>`
+          const rp = l.replay ? `<span class="rp-tag">${t('rp.prefix')}</span>` : ''
+          return `<div class="ln ${l.level}${l.replay ? ' rp' : ''}"><span class="t">${ts}</span><span class="src">${esc(srcName(l.source))}</span><span class="ico">${ico}</span>${rp}${esc(text)}</div>`
         })
         .join('') +
       '</div>',
@@ -629,7 +643,8 @@ function renderTable() {
 
 export function render() {
   const now = Date.now()
-  const p = store.active
+  RF = READ_ONLY ? replayFrame(now) : null
+  const p = RF ? RF.p : store.active
   renderStatic()
   renderTop()
   renderAttacker(p)

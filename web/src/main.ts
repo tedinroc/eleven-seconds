@@ -3,7 +3,7 @@ import { blocks } from './chain'
 import { playFake, startFake, toggleFakeOffline } from './fake'
 import { cycleLang, initLang } from './i18n'
 import { checkVerified, fillProposeTx } from './lookup'
-import { startChainWatch, selectProposal } from './chainwatch'
+import { startChainWatch, selectProposal, tickReplay, toggleReplay } from './chainwatch'
 import { MODE, READ_ONLY } from './runtime'
 import { connectServices, getDriver, postDriver } from './sse'
 import { store } from './store'
@@ -20,6 +20,8 @@ const mark = () => {
 store.onChange(mark)
 blocks.onChange(mark)
 function loop() {
+  // chain 模式：推进链上真实事件的自动回放（虚拟区块时钟）
+  if (READ_ONLY && tickReplay()) dirty = true
   if (dirty) {
     dirty = false
     if (MODE !== 'fake') {
@@ -121,7 +123,9 @@ async function approveV2() {
 
 function act(a: string) {
   if (READ_ONLY && (a === 'judge' || a === 'approve' || a === 'kill' || a === 'reshuffle' || a.startsWith('p:'))) return
-  if (a.startsWith('sel:')) {
+  if (a === 'replay') {
+    if (READ_ONLY) toggleReplay()
+  } else if (a.startsWith('sel:')) {
     selectProposal(a.slice(4))
     ui.reportDismissedFor = ''
   } else if (a === 'judge') {
@@ -176,6 +180,7 @@ document.addEventListener('keydown', (ev) => {
   else if (k === 'k') act(ev.shiftKey ? 'revive' : 'kill')
   else if (k === 'a') act('approve')
   else if (k === 'l') cycleLang()
+  else if (k === 'p' && READ_ONLY) act('replay')
   else if (k === 'escape') {
     ui.judgeOpen = false
     ui.tableOpen = false

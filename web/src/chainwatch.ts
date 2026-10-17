@@ -11,6 +11,9 @@ import { msg } from './i18n'
 import { CHAIN, SENTINELS } from './runtime'
 import { short, store, type Proposal } from './store'
 import type { CardId } from './types'
+import { AutoReplay, type ReplayFrame, type Timeline, type TLStep } from './replay'
+import { CONFIG } from './config'
+import { plausibleBlockMs } from './derive'
 
 const ABI = DATA.abi as Abi
 const GA = DATA.guardedAdmin as Hex
@@ -123,6 +126,8 @@ function pickActive() {
 let manualPick = false
 export function selectProposal(id: string) {
   if (!store.proposals.has(id)) return
+  // 使用者自己选提案：结束回放，闲置 60 秒后才再自动回放
+  replay.stop(Date.now())
   store.activeId = id
   const newest = Math.max(...[...store.proposals.keys()].map(Number))
   manualPick = Number(id) !== newest
@@ -228,6 +233,8 @@ function handleLog(l: RawLog, live: boolean) {
   const tx = l.transactionHash
   const p = ensure(id)
   const ts = Date.now()
+  // 即时事件永远优先：立刻停止自动回放（闲置 60 秒后才会再回放）
+  if (live) replay.onLive(ts)
   switch (ev.eventName) {
     case 'Proposed': {
       p.kind = String(ev.args.kind)
@@ -264,12 +271,13 @@ function handleLog(l: RawLog, live: boolean) {
       break
     }
     case 'Executed':
-      p.execute = { txHash: tx, result: 'success', error: null, ts }
+      p.execute = { txHash: tx, result: 'success', error: null, ts, block }
       store.logT('chain', 'Executed', msg('cw.executed', { id, b: block, tx: short(tx) }), 'good', ts)
       break
     case 'ReasonAttached':
       p.report.attachTx = tx
       p.report.reportHash = String(ev.args.reportHash)
+      p.report.attachBlock = block
       store.logT('chain', 'ReasonAttached', msg('cw.reason', { id, h: short(String(ev.args.reportHash)) }), 'info', ts)
       break
   }
@@ -400,4 +408,69 @@ export function startChainWatch() {
       inferPass(p)
     }
   }, 1000)
+}
+
+// ---------- 链上真实事件自动回放（见 replay.ts；只在 chain 模式启动） ----------
+function logReplayStep(tl: Timeline, st: TLStep, src: Proposal) {
+  const id = tl.id
+  const b = st.block
+  switch (st.kind) {
+    case 'proposed':
+      store.logT('chain', 'Proposed', msg('cw.proposed', { id, b, rb: tl.readyBlock, tx: short(src.proposeTx) }), 'info', Date.now(), true)
+      break
+    case 'veto': {
+      const sp = src.sentinels[st.sentinel ?? '']
+      const n = tl.steps.filter((x) => x.kind === 'veto').indexOf(st) + 1
+      const who = st.sentinel ? msg('cw.whoS', { n: st.sentinel.split('-')[1] }) : msg('cw.ruleUnknown')
+      const real = sp?.receipt?.block ?? b
+      store.logT('chain', 'Vetoed', msg('cw.vetoed', { id, who, b: real, after: msg('cw.after', { n: real - tl.proposeBlock }), rule: sp?.rule ?? msg('cw.ruleUnknown'), n }), 'bad', Date.now(), true)
+      break
+    }
+    case 'reason':
+      store.logT('chain', 'ReasonAttached', msg('cw.reason', { id, h: short(src.report.reportHash) }), 'info', Date.now(), true)
+      break
+    case 'ready':
+      store.logT('chain', 'ready', tl.type === 'attack' ? msg('rp.readyVetoed', { id, b }) : msg('rp.readyPassed', { id, b }), tl.type === 'attack' ? 'bad' : 'good', Date.now(), true)
+      break
+    case 'executed':
+      store.logT('chain', 'Executed', msg('cw.executed', { id, b: src.execute?.block ?? b, tx: short(src.execute?.txHash) }), 'good', Date.now(), true)
+      break
+  }
+}
+
+export const replay = new AutoReplay(Date.now(), logReplayStep)
+const reducedMotion = () => {
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  } catch {
+    return false
+  }
+}
+
+/** 最新的提案还在冷静期内（即时提案）：不回放 */
+function liveBusy(): boolean {
+  let newest: Proposal | null = null
+  for (const p of store.proposals.values()) if (!newest || Number(p.id) > Number(newest.id)) newest = p
+  return !!newest && newest.chain?.status === 1 && newest.readyBlock !== null && blocks.latest > 0 && blocks.latest < newest.readyBlock
+}
+
+/** main.ts 每帧呼叫；回传是否要重画 */
+export function tickReplay(now = Date.now()): boolean {
+  if (!chainHealth.loadedRecent) return false
+  return replay.tick(now, {
+    proposals: store.proposals.values(),
+    get: (id) => store.proposals.get(id),
+    blockMs: plausibleBlockMs(blocks.blockTimeMs(), CONFIG.minPlausibleBlockMs),
+    reduced: reducedMotion(),
+    liveBusy: liveBusy(),
+  })
+}
+
+export function replayFrame(now = Date.now()): ReplayFrame | null {
+  return replay.frame(now, (id) => store.proposals.get(id))
+}
+
+export function toggleReplay() {
+  replay.toggle(Date.now())
+  store.emit()
 }

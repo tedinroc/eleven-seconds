@@ -10,6 +10,7 @@ import { SENTINELS } from '../src/runtime'
 import { store, type Proposal } from '../src/store'
 import { RULE_TEXT } from '../src/types'
 import { judge, render, ui } from '../src/ui'
+import { AutoReplay, buildTimeline, pickReplay, REPLAY, replayStage, snapshotAt, type Timeline, type TLStep } from '../src/replay'
 
 let fails = 0
 function ok(cond: unknown, msg: string) {
@@ -219,6 +220,102 @@ ok(RULE_TEXT.R3B_THIRD_PARTY_FUNDS?.length > 0 && RULE_TEXT.R9_NEW_OPCODES?.leng
   ok(/<button data-lang[^>]*>[\s\S]*简[\s\S]*繁[\s\S]*EN/.test(out.en) && Object.values(LANG_LABEL).join('/') === '简/繁/EN', '工具列有「简 / 繁 / EN」切换钮')
   ok(/class="r-body"><div>[^<]*[一-鿿]/.test(out.en) && out.en.includes('original: Chinese'), 'en 下报告正文维持原文，旁边标示原文语言')
   setLang('zh-CN', false)
+}
+
+// ---------- 5. chain 模式：链上真实事件自动回放（replay.ts 纯函数＋控制器） ----------
+{
+  const H = (n: number) => '0x' + n.toString(16).padStart(64, '0')
+  const rc = (block: number) => ({ txHash: H(block), block, status: 'success', gasUsed: '123112', gasLimit: '123112', effectiveGasPrice: '102000000000', latencyMs: null })
+  // 被否决的攻击：提案块 71719034、readyBlock 71719064，三个 guardian 依序在 +9／+10／+11 块否决
+  const atk: Proposal = {
+    id: '7', kind: '0', target: '0xabc', codehash: '0x01', proposeBlock: 71719034, readyBlock: 71719064, firstTs: 0, proposeTx: H(1),
+    sentinels: {
+      'sentinel-2': { verdict: 'veto', rule: 'R1_TOTAL_SUPPLY', vetoTx: H(71719044), receipt: rc(71719044) },
+      'sentinel-1': { verdict: 'veto', rule: 'R1_TOTAL_SUPPLY', vetoTx: H(71719043), receipt: rc(71719043) },
+      'sentinel-3': { verdict: 'veto', rule: 'R1_TOTAL_SUPPLY', vetoTx: H(71719045), receipt: rc(71719045) },
+    },
+    report: { text: '', done: false, open: false, attachTx: H(9), reportHash: H(10), attachBlock: 71719050 },
+    chain: { status: 2, statusName: 'Vetoed', vetoCount: 3, proposer: '0x1', readTs: 0 },
+  }
+  // 已执行的 v2：提案块 71719100、readyBlock 71719130、Executed 在 71719142
+  const v2: Proposal = {
+    id: '8', kind: '0', target: '0xdef', codehash: '0x02', proposeBlock: 71719100, readyBlock: 71719130, firstTs: 0, proposeTx: H(2),
+    sentinels: { 'sentinel-1': {}, 'sentinel-2': {}, 'sentinel-3': {} },
+    execute: { txHash: H(71719142), result: 'success', error: null, ts: 0, block: 71719142 },
+    report: { text: '', done: false, open: false },
+    chain: { status: 3, statusName: 'Executed', vetoCount: 0, proposer: '0x1', readTs: 0 },
+  }
+  const older: Proposal = { ...atk, id: '3', proposeBlock: 71710000, readyBlock: 71710030 }
+  const pending: Proposal = { ...v2, id: '9', chain: { ...v2.chain!, status: 1 }, execute: undefined }
+
+  const tl = buildTimeline(atk)!
+  const kinds = tl.steps.map((x) => x.kind + (x.sentinel ? ':' + x.sentinel.split('-')[1] : '')).join(',')
+  ok(kinds === 'proposed,veto:1,veto:2,veto:3,reason,ready', `回放：攻击时间轴事件顺序 ${kinds}`)
+  ok(tl.type === 'attack' && tl.start === 71719032 && tl.end === 71719067, `回放：虚拟时钟从提案前 2 块（${tl.start}）到 readyBlock+3（${tl.end}）`)
+  const offs = tl.steps.filter((x) => x.kind === 'veto').map((x) => x.block - tl.proposeBlock)
+  ok(offs.join('/') === '9/10/11', `回放：否决区块偏移 ${offs.join('/')}（期望 9/10/11，取自收据块号）`)
+  const before = snapshotAt(atk, tl, 71719042)
+  ok(before.chain?.status === 1 && vetoMetrics(before, SENTINELS) === null && !before.report.attachTx, '回放：第一笔否决之前是冷静期中、大字指标不出数字')
+  const first = snapshotAt(atk, tl, 71719043)
+  const fm = vetoMetrics(first, SENTINELS)
+  ok(first.chain?.status === 2 && first.chain.vetoCount === 1 && fm?.usedBlocks === 9 && fm.waitBlocks === 21 && fm.costWei !== null && fmtMon(fm.costWei) === '0.01256 MON', '回放：第一笔否决出现才显示真实值（9 块／21 块／0.01256 MON）')
+  ok(snapshotAt(atk, tl, 71719045).chain?.vetoCount === 3 && snapshotAt(atk, tl, 71719050).report.attachTx === H(9), '回放：三票依序亮起、ReasonAttached 在它的区块出现')
+  ok(snapshotAt(atk, tl, 71719033).chain === undefined && snapshotAt(atk, tl, 71719033).proposeTx === undefined, '回放：提案块之前还没有链上状态')
+  ok(replayStage(71719043, 71719043) === 0 && replayStage(71719043, 71719045) === 2 && replayStage(71719043, 71719090) === 3 && replayStage(71719043, 71719042) === -1, '回放：四段状态条随虚拟区块依序点亮')
+
+  const tv = buildTimeline(v2)!
+  ok(tv.type === 'v2' && tv.steps.map((x) => x.kind).join(',') === 'proposed,ready,executed' && tv.end === 71719145, `回放：v2 时间轴 proposed→ready→executed，终点延到 Executed+3（${tv.end}）`)
+  const v2a = snapshotAt(v2, tv, 71719141)
+  const v2b = snapshotAt(v2, tv, 71719142)
+  ok(!v2a.execute && v2a.chain?.status === 1 && SENTINELS.every((s) => v2a.sentinels[s].verdict === 'pass'), '回放：v2 冷静期满后哨兵未否决、Executed 前还没生效')
+  ok(v2b.execute?.txHash === H(71719142) && v2b.chain?.status === 3, '回放：v2 到 Executed 区块显示已生效与 Executed tx')
+  ok(buildTimeline(pending) === null && buildTimeline({ ...atk, chain: { ...atk.chain!, status: 1 } }) === null, '回放：还在冷静期／没有真实结果的提案不回放')
+  const pick = pickReplay([older, atk, v2, pending])
+  ok(pick.attack?.id === '7' && pick.v2?.id === '8', '回放：挑最近一个被否决的攻击与最近一个已执行的 v2')
+  ok(pickReplay([older]).v2 === null, '回放：找不到 v2 时只有攻击')
+
+  // 控制器：8 秒触发、轮流播放、每段停 4 秒、即时事件打断、闲置 60 秒再回放、P 键暂停
+  const logged: string[] = []
+  const r = new AutoReplay(0, (t: Timeline, st: TLStep) => logged.push(`${t.id}:${st.kind}`))
+  const props = new Map([atk, v2].map((p) => [p.id, p]))
+  const ctx = (o: Partial<{ busy: boolean; reduced: boolean }> = {}) => ({ proposals: props.values(), get: (id: string) => props.get(id), blockMs: 300, reduced: !!o.reduced, liveBusy: !!o.busy })
+  const get = (id: string) => props.get(id)
+  r.tick(REPLAY.firstDelayMs - 1, ctx())
+  ok(!r.active, '回放：开页 8 秒内不开始')
+  r.tick(REPLAY.firstDelayMs, ctx())
+  ok(r.active && r.frame(REPLAY.firstDelayMs, get)?.tl.id === '7' && r.frame(REPLAY.firstDelayMs, get)?.vblock === 71719032, '回放：8 秒没有即时事件就从攻击开始，起点是提案前 2 块')
+  const t9 = REPLAY.firstDelayMs + 11 * 300
+  r.tick(t9, ctx())
+  ok(r.frame(t9, get)?.vblock === 71719043 && logged.join(',') === '7:proposed,7:veto', `回放：按 0.3 秒/块推进，第 11 块时已播 ${logged.join(',')}`)
+  const segMs = (tl.end - tl.start) * 300
+  r.tick(REPLAY.firstDelayMs + segMs + 10, ctx())
+  ok(r.frame(REPLAY.firstDelayMs + segMs + 10, get)?.hold === true && r.frame(REPLAY.firstDelayMs + segMs + 10, get)?.tl.id === '7', '回放：播到终点后停在最终状态')
+  const tNext = REPLAY.firstDelayMs + segMs + REPLAY.gapMs
+  r.tick(tNext, ctx())
+  ok(r.frame(tNext, get)?.tl.id === '8', '回放：停 4 秒后轮到 v2')
+  // 即时事件打断
+  const tLive = tNext + 1000
+  r.onLive(tLive)
+  ok(!r.active && r.frame(tLive, get) === null, '回放：收到即时事件立刻停止回放')
+  r.tick(tLive + REPLAY.idleMs - 1, ctx())
+  ok(!r.active, '回放：距离上一次即时事件不到 60 秒不再回放')
+  r.tick(tLive + REPLAY.idleMs, ctx())
+  ok(r.active && r.frame(tLive + REPLAY.idleMs, get)?.tl.id === '7', '回放：闲置 60 秒后从攻击重新回放')
+  r.tick(tLive + REPLAY.idleMs + 100, ctx({ busy: true }))
+  ok(!r.active, '回放：有即时提案在冷静期中就让位给即时画面')
+  // 暂停／继续
+  const tp = tLive + REPLAY.idleMs + 200
+  r.tick(tp, ctx())
+  const fz = r.frame(tp + 900, get)?.vblock
+  r.toggle(tp + 900)
+  r.tick(tp + 5000, ctx())
+  ok(r.paused && r.frame(tp + 5000, get)?.vblock === fz && r.frame(tp + 5000, get)?.paused === true, '回放：暂停时冻结在当下的回放区块')
+  r.toggle(tp + 5000)
+  ok(!r.paused && r.frame(tp + 5000 + 300, get)!.vblock === fz! + 1, '回放：继续后从冻结处接着播')
+  // prefers-reduced-motion：直接最终状态
+  const rr = new AutoReplay(0)
+  rr.tick(REPLAY.firstDelayMs, ctx({ reduced: true }))
+  ok(rr.frame(REPLAY.firstDelayMs, get)?.vblock === tl.end && rr.frame(REPLAY.firstDelayMs, get)?.p.chain?.status === 2, 'prefers-reduced-motion：直接显示每段的最终状态')
 }
 
 console.log(fails ? `\n${fails} 项失败` : '\n全部通过')
