@@ -1,0 +1,49 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+test = "test"
+script = "script"
+
+solc_version = "0.8.37"       # pinned; must already be in the local svm cache for --offline builds
+evm_version = "osaka"         # Monad supports the Fusaka opcode/precompile set
+network = "monad"             # Foundry >= 1.8: Monad gas model, opcode pricing, 128 KB code limit
+optimizer = true
+optimizer_runs = 10_000
+via_ir = false
+
+# Keep the default metadata hash: Sourcify returns `exact_match` only when the CBOR metadata is present.
+bytecode_hash = "ipfs"
+cbor_metadata = true
+
+# Remappings are explicit (remappings.txt). Auto-detection would pick up the upgradeable package's own
+# remapping to its (empty) git-submodule copy of openzeppelin-contracts.
+auto_detect_remappings = false
+
+fs_permissions = [{ access = "read", path = "./" }]
+
+[fuzz]
+runs = 1_000
+
+[invariant]
+runs = 256
+depth = 64
+fail_on_revert = false
+
+# Use with `--rpc-url monad_testnet` (or any other key below). First entry is the official endpoint.
+[rpc_endpoints]
+monad_testnet = "https://testnet-rpc.monad.xyz"
+monad_testnet_ankr = "https://rpc.ankr.com/monad_testnet"
+monad_testnet_thirdweb = "https://10143.rpc.thirdweb.com"
+monad_testnet_monadinfra = "https://rpc-testnet.monadinfra.com"
+monad_testnet_drpc = "https://monad-testnet.drpc.org"
+monad = "https://rpc.monad.xyz"
+
+# Contract verification (Sourcify on MonadVision). Foundry has no verifier key in foundry.toml, so the
+# verifier URL comes from the VERIFIER_URL env var (see .env.example) or scripts/deploy.sh:
+#   forge verify-contract <address> src/Counter.sol:Counter --chain 10143 \
+#     --verifier sourcify --verifier-url https://sourcify-api-monad.blockvision.org/ --watch
+# Fallback verifier URL: https://sourcify.dev/server/
+
+[fmt]
+line_length = 120

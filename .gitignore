@@ -1,0 +1,26 @@
+# Foundry
+out/
+cache/
+broadcast/*/31337/
+deployments/*.31337.json
+
+# Node
+node_modules/
+dist/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.key
+keystore/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Local-only prep notes (not part of the submission)
+PREP-NOTES.md
+
+.claude/settings.local.json
