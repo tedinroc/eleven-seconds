@@ -46,7 +46,7 @@ p, li { font-size: 38px; line-height: 1.5; }
 .muted { color: var(--muted); }
 .small { font-size: 28px; }
 .mono { font-family: var(--mono); }
-.red { color: var(--danger); } .green { color: var(--accent2); } .purple { color: var(--accent); } .yellow { color: var(--warn); }
+.ink { color: var(--ink); } .red { color: var(--danger); } .green { color: var(--accent2); } .purple { color: var(--accent); } .yellow { color: var(--warn); }
 
 /* 渐入元素：进入页面时依序出现 */
 .slide.active .rise { animation: rise .7s cubic-bezier(.2,.8,.2,1) both; }
@@ -90,6 +90,20 @@ p, li { font-size: 38px; line-height: 1.5; }
 .slide.active .flow > :nth-child(5) { animation-delay: .8s } .slide.active .flow > :nth-child(6) { animation-delay: 1s }
 .slide.active .flow > :nth-child(7) { animation-delay: 1.15s }
 .bigline { margin-top: 70px; font-size: 52px; font-weight: 700; }
+/* 2 问题：真实案例时间轴（事实与出处见 prep/facts-verified.md） */
+.s-problem h2 { margin-bottom: 22px; }
+.s-problem .flow { margin-top: 10px; }
+.s-problem .flow .step { min-height: 132px; padding: 18px 16px; }
+.s-problem .flow .step .t { font-size: 36px; white-space: nowrap; }
+.cases-h { margin-top: 40px; font-size: 30px; color: var(--muted); }
+.cases { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 14px; }
+.case { background: var(--panel); border: 2px solid var(--line); border-radius: 20px; padding: 18px 24px; }
+.case .d { font-family: var(--mono); font-size: 24px; color: var(--muted); }
+.case .n { font-size: 36px; font-weight: 800; margin: 4px 0 6px; }
+.case p { font-size: 28px; line-height: 1.45; color: var(--muted); }
+.case.hot { border-color: var(--danger); background: #2a1527; }
+.case.hot .n { color: var(--danger); }
+.cases-src { margin-top: 12px; font-size: 20px; color: var(--muted); opacity: .8; }
 
 /* ---------- 3 timelock ---------- */
 .strike { position: relative; display: inline-block; font-size: 120px; font-weight: 800; color: var(--muted); }
@@ -196,7 +210,7 @@ p, li { font-size: 38px; line-height: 1.5; }
   </section>
 
   <!-- 2 问题 -->
-  <section class="slide" data-title="问题">
+  <section class="slide s-problem" data-title="问题">
     <div class="kicker">问题</div>
     <h2>合约升级，是 Web3 最危险的一个按钮</h2>
     <div class="flow">
@@ -208,7 +222,13 @@ p, li { font-size: 38px; line-height: 1.5; }
       <div class="arrow">→</div>
       <div class="step bad"><div class="n">04</div><div class="t">无限铸币</div></div>
     </div>
-    <p class="bigline rise">攻击者部署完恶意合约，<span class="red">紧接着就能升级</span>。<br><span class="muted">这不是假设，是反复出现的攻击模式。</span></p>
+    <p class="cases-h rise">这不是假设，是反复出现的攻击模式：</p>
+    <div class="cases rise">
+      <div class="case"><div class="d">2022.12 · BSC</div><div class="n">Ankr aBNBc</div><p>部署者私钥被盗，合约被升级成可无限铸币的版本；损失约 500 万美元</p></div>
+      <div class="case"><div class="d">2024.10 · BSC／Arbitrum</div><div class="n">Radiant Capital</div><p>多签（11 选 3）的签名被恶意软件骗走，借贷池所有权被转走并升级；损失约 5000 万美元</p></div>
+      <div class="case hot"><div class="d">2026.07 · BSC</div><div class="n">Solv BTC+</div><p>部署者私钥泄露，铸币 proxy 被升级成恶意合约，增发了未授权的 BTC+</p></div>
+    </div>
+    <p class="cases-src rise">来源：Ankr 事后报告、Rekt；Solv 官方论坛 2026-07-19 安全公告</p>
   </section>
 
   <!-- 3 为什么没人装 timelock -->
@@ -217,7 +237,7 @@ p, li { font-size: 38px; line-height: 1.5; }
     <div class="rise"><span class="strike">48–72 小时 timelock</span></div>
     <div class="cols">
       <div class="card rise"><h3>太慢</h3><p>紧急修 bug 也被卡住几天，安全和速度只能选一个。</p></div>
-      <div class="card rise"><h3>只让你等，不替你拦</h3><p>timelock 只是延迟，不会检查新合约有没有问题。</p></div>
+      <div class="card rise"><h3>只让你等，不替你拦</h3><p>timelock 只延迟、不检查新合约。<br><span class="ink">Solv 事后的架构文件也这样写。</span></p></div>
     </div>
     <p class="bigline rise" style="margin-top:56px">结果：很多可升级合约的升级权，<span class="red">就是一把私钥</span>。</p>
   </section>
