@@ -315,7 +315,8 @@ and slides. The commit history shows everything added after the boilerplate comm
 - **Before the event:** Claude Code helped prepare the boilerplate and the planning spec listed above.
 - **Inside the product:** the reporter writes its risk note with a local Qwen model through LM Studio
   when one is available, and otherwise with a rule-based template (marked as a template in the UI). The
-  notes from today's testnet run were template notes. Either way the note only explains; the veto
+  notes on today's testnet run were template notes up to proposal #33; from #34 on they are written by
+  Qwen3.8-27B running locally in LM Studio (about 3–5 s per note). Either way the note only explains; the veto
   decision is made by the sentinels' invariant checks.
 
 ## Scope and next steps
