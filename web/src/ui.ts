@@ -252,8 +252,17 @@ function arenaStatus(now: number): string {
   let cls = ''
   if (st?.kind === 'sending') main = t('ar.sending')
   else if (st?.kind === 'sent') {
-    main = st.id ? t('ar.sent', { id: esc(st.id), card: name(st.card) }) : t('ar.sentNoId', { card: name(st.card) })
-    cls = 'good'
+    // 链上有结果后改说结果，不再停在「判定中」
+    const cs = st.id ? store.proposals.get(String(st.id))?.chain?.status : undefined
+    main =
+      cs === 2
+        ? t('ar.sentVetoed', { id: esc(st.id!), card: name(st.card) })
+        : cs === 3
+          ? t('ar.sentExecuted', { id: esc(st.id!), card: name(st.card) })
+          : st.id
+            ? t('ar.sent', { id: esc(st.id), card: name(st.card) })
+            : t('ar.sentNoId', { card: name(st.card) })
+    cls = cs === 2 ? 'bad' : 'good'
   } else if (st?.kind === 'error') {
     main = t('ar.error', { err: esc(st.err) })
     cls = 'bad'

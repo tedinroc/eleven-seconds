@@ -44,7 +44,7 @@ const tb = () => dom.els.get('toolbar')?.innerHTML ?? ''
 const LABELS: Record<Lang, string[]> = {
   'zh-CN': ['增发', '夺权', '抽成', '正常升级 v2', '按下攻击卡，云端哨兵会在冷静期内自动否决', '云端互动'],
   'zh-TW': ['增發', '奪權', '抽成', '正常升級 v2', '按下攻擊卡，雲端哨兵會在冷靜期內自動否決', '雲端互動'],
-  en: ['Mint', 'Takeover', 'Fee skim', 'Upgrade v2', 'Press an attack card: cloud sentinels veto it during cooldown', 'cloud interactive'],
+  en: ['Mint', 'Takeover', 'Fee skim', 'Upgrade v2', 'Press an attack card: cloud sentinels veto it during cooldown', 'Monad Testnet · Arena'],
 }
 for (const l of ['zh-CN', 'zh-TW', 'en'] as Lang[]) {
   setLang(l, false)
