@@ -147,6 +147,10 @@ function langButton(): string {
 }
 
 // ---------- 顶部 ----------
+/** 云端只读版指向云端互动版（另一个 Pages 项目），带上目前语言 */
+const ARENA_URL = 'https://eleven-seconds-arena.pages.dev/'
+const arenaHref = () => `${ARENA_URL}?lang=${lang()}`
+
 /** 右上角栏位宽度（与 style.css #top 第三栏一致）与区块数字最大字号 */
 const BLK_WIDTH = 396
 const BLK_MAX_PX = 84
@@ -194,7 +198,7 @@ function renderTop() {
       .join('')
     patch(
       'toolbar',
-      `<span class="ro">${t('tb.readonly')}</span><button data-act="table">${t('tb.table')}</button><button data-act="report">${t('tb.reportHash')}</button><button data-act="replay" class="rp-btn${replay.paused ? ' paused' : ''}" title="${esc(`${replay.paused ? t('rp.resumeFull') : t('rp.pauseFull')} · ${t('rp.btnTitle')}`)}" aria-label="${esc(replay.paused ? t('rp.resumeFull') : t('rp.pauseFull'))}">${replay.paused ? t('rp.resume') : t('rp.pause')}</button>${langButton()}` +
+      `<span class="ro">${t('tb.readonly')}${MODE === 'chain' ? ` <a class="ro-arena" href="${esc(arenaHref())}" target="_blank" rel="noopener">${t('tb.arena')}</a>` : ''}</span><button data-act="table">${t('tb.table')}</button><button data-act="report">${t('tb.reportHash')}</button><button data-act="replay" class="rp-btn${replay.paused ? ' paused' : ''}" title="${esc(`${replay.paused ? t('rp.resumeFull') : t('rp.pauseFull')} · ${t('rp.btnTitle')}`)}" aria-label="${esc(replay.paused ? t('rp.resumeFull') : t('rp.pauseFull'))}">${replay.paused ? t('rp.resume') : t('rp.pause')}</button>${langButton()}` +
         (ids.length ? `<span class="hint">${t('tb.recent')}${chips}</span>` : `<span class="hint">${chainHealth.loadedRecent ? t('tb.noProposals') : t('tb.loadingRecent')}</span>`),
     )
     return

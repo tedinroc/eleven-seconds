@@ -1184,6 +1184,20 @@ html.layout-stack .toolbar .hint button {
 html.layout-stack .toolbar .ro {
   text-align: left;
 }
+.toolbar .ro .ro-arena {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 12px;
+  border: 1px solid var(--live);
+  border-radius: 999px;
+  background: #241c4a;
+  color: var(--fg);
+  font-weight: 700;
+  text-decoration: none;
+}
+.toolbar .ro .ro-arena:hover {
+  background: #33287a;
+}
 
 /* ---------- 攻击者 / 哨兵 ---------- */
 html.layout-stack main {

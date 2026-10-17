@@ -25,6 +25,15 @@ adapts to phones and tablets with a stacked, scrollable layout; wide landscape s
 Rebuild: `cd web && npm run build:cloud` (bundles `shared/` deployment, ABI and rule hashes), then
 `npx -y wrangler@3 pages deploy dist --project-name eleven-seconds --branch main`.
 
+**https://eleven-seconds-arena.pages.dev** — the Arena, where visitors fire the cards themselves. Pick
+EvilMint, EvilOwner, EvilFee or the v2 upgrade: a Cloudflare Worker (one Durable Object, no public
+hostname) proposes it on a separate set of testnet contracts, three independently keyed sentinel verdicts
+simulate it with `eth_simulateV1` + `stateOverride` and veto on chain, and the engine calls `execute` when
+the cooldown ends. One proposal is in flight at a time, each visitor gets one card every 45 s, with hourly
+and daily caps. Checked from the public URL on 2026-10-17: each attack card was vetoed by 3/3 sentinels
+3–4 blocks after the proposal and `execute` reverted with `ProposalVetoed`; v2 passed and executed.
+Details and deploy steps: [arena/README.md](arena/README.md).
+
 ## The problem
 
 Upgradeable proxies are the most dangerous button in a protocol. When the upgrade key leaks, the
@@ -138,6 +147,12 @@ Verification is on the MonadVision Sourcify instance (`sourcify-api-monad.blockv
 The attack implementations are not verified on purpose: a real attacker does not publish source, and
 the sentinels judge bytecode only. Guardians: `0x7ED9…EF3b`, `0xd662…6B68`, `0x94b5…98bE`
 (full list in the deployments file).
+
+The Arena runs on its own contracts so visitors' proposals never touch the stage deployment:
+GuardedAdmin [`0x1d286Ef4D622EFD91FeDe3560fB4Cff0D4ff0c59`](https://testnet.monadexplorer.com/address/0x1d286Ef4D622EFD91FeDe3560fB4Cff0D4ff0c59),
+DemoBTC proxy [`0x5E58083bA85add746592352D49d3Db8f4E5A1a95`](https://testnet.monadexplorer.com/address/0x5E58083bA85add746592352D49d3Db8f4E5A1a95),
+deployed at block 71767314 (GuardedAdmin, DemoBTC v1 and v2 Sourcify exact match; full list in
+[`shared/deployments/10143-arena.json`](shared/deployments/10143-arena.json)).
 
 ## Measured today on Monad testnet (venue network, 2026-10-17)
 
@@ -262,6 +277,7 @@ ROUNDS=5 node sentinel/test/e2e-anvil.mjs           # needs anvil + deploy + 3 r
 | `reporter/` | risk-note writer: local LLM with template fallback, hash attached on chain ([README](reporter/README.md)) |
 | `driver/` | demo driver for the war room: propose cards, auto-execute, approve codehash |
 | `web/` | war room frontend (Vite + TypeScript + viem) |
+| `arena/` | cloud Arena: engine Worker + Durable Object (`arena/worker`), Pages front end with a service binding (`arena/pages`) |
 | `shared/` | ABIs, deployment addresses, gas limits, rule-hash table shared by all parts |
 | `docs/` | `spec.md` (pre-event plain-text spec), `contracts-cheatsheet.md` (manual `cast` operations) |
 | `slides/` | offline pitch deck (`slides/index.html`, arrow keys to navigate) |
