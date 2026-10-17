@@ -259,25 +259,25 @@ p, li { font-size: 38px; line-height: 1.5; }
           <marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5be3c8"/></marker>
         </defs>
         <!-- 顶行 -->
-        <g class="box atk"><rect x="0" y="20" width="250" height="120" rx="18"/><text class="t1" x="125" y="72" text-anchor="middle">owner 钥匙</text><text class="t2" x="125" y="110" text-anchor="middle">（假设已泄露）</text></g>
-        <g class="box main"><rect x="330" y="0" width="560" height="160" rx="20"/><text class="t1" x="610" y="52" text-anchor="middle">GuardedAdmin</text><text class="t2" x="610" y="94" text-anchor="middle">提案 → 30 个区块 → 执行</text><text class="t2" x="610" y="130" text-anchor="middle">任一 guardian 可否决 · breakGlass 暂停</text></g>
-        <g class="box"><rect x="970" y="20" width="190" height="120" rx="18"/><text class="t1" x="1065" y="72" text-anchor="middle">ProxyAdmin</text><text class="t2" x="1065" y="110" text-anchor="middle">owner 已转交</text></g>
+        <g class="box atk"><rect x="0" y="20" width="230" height="120" rx="18"/><text class="t1" x="115" y="72" text-anchor="middle">owner 钥匙</text><text class="t2" x="115" y="110" text-anchor="middle">（假设已泄露）</text></g>
+        <g class="box main"><rect x="310" y="0" width="500" height="160" rx="20"/><text class="t1" x="560" y="52" text-anchor="middle">GuardedAdmin</text><text class="t2" x="560" y="94" text-anchor="middle">提案 → 30 个区块 → 执行</text><text class="t2" x="560" y="130" text-anchor="middle">任一 guardian 可否决 · breakGlass 暂停</text></g>
+        <g class="box"><rect x="940" y="20" width="230" height="120" rx="18"/><text class="t1" x="1055" y="72" text-anchor="middle">ProxyAdmin</text><text class="t2" x="1055" y="110" text-anchor="middle">owner 已转交</text></g>
         <g class="box"><rect x="1210" y="20" width="170" height="120" rx="18"/><text class="t1" x="1295" y="72" text-anchor="middle">Proxy</text><text class="t2" x="1295" y="110" text-anchor="middle">dBTC</text></g>
-        <path class="edge draw" d="M250 80 H322" marker-end="url(#ah)"/>
-        <text class="lab" x="258" y="64">提案</text>
-        <path class="edge green draw" d="M890 80 H962" marker-end="url(#ahg)"/>
-        <path class="edge green draw" d="M1160 80 H1202" marker-end="url(#ahg)"/>
-        <text class="lab" x="898" y="64">到期执行</text>
+        <path class="edge draw" d="M230 80 H302" marker-end="url(#ah)"/>
+        <text class="lab" x="266" y="64" text-anchor="middle">提案</text>
+        <path class="edge green draw" d="M810 80 H932" marker-end="url(#ahg)"/>
+        <path class="edge green draw" d="M1170 80 H1202" marker-end="url(#ahg)"/>
+        <text class="lab" x="871" y="64" text-anchor="middle">到期执行</text>
         <!-- 哨兵 -->
         <g class="box sen"><rect x="180" y="300" width="300" height="130" rx="18"/><text class="t1" x="330" y="355" text-anchor="middle">哨兵 1</text><text class="t2" x="330" y="395" text-anchor="middle">独立进程 · 独立钥匙</text></g>
         <g class="box sen"><rect x="540" y="300" width="300" height="130" rx="18"/><text class="t1" x="690" y="355" text-anchor="middle">哨兵 2</text><text class="t2" x="690" y="395" text-anchor="middle">独立进程 · 独立钥匙</text></g>
         <g class="box sen"><rect x="900" y="300" width="300" height="130" rx="18"/><text class="t1" x="1050" y="355" text-anchor="middle">哨兵 3</text><text class="t2" x="1050" y="395" text-anchor="middle">独立进程 · 独立钥匙</text></g>
-        <path class="edge draw" d="M500 160 V 230 H 330 V 292" marker-end="url(#ah)"/>
+        <path class="edge draw" d="M450 160 V 230 H 230 V 292" marker-end="url(#ah)"/>
         <path class="edge draw" d="M610 160 V 292" marker-end="url(#ah)" transform="translate(80 0)"/>
         <path class="edge draw" d="M720 160 V 230 H 1050 V 292" marker-end="url(#ah)"/>
         <text class="lab" x="740" y="218">Proposed 事件</text>
         <path class="edge red draw" d="M420 300 C 420 250, 400 210, 400 168" marker-end="url(#ahr)"/>
-        <text class="lab" x="230" y="250" style="fill:#ff5c7a">veto(id, 规则)</text>
+        <text class="lab" x="392" y="268" text-anchor="end" style="fill:#ff5c7a">veto(id, 规则)</text>
         <!-- 模拟 -->
         <text class="t2" x="690" y="478" text-anchor="middle">eth_simulateV1 ＋ stateOverride：把新合约换进 proxy，陌生地址先打一遍</text>
         <text class="t2" x="690" y="512" text-anchor="middle">哨兵只看字节码，不需要攻击者公开源码</text>
