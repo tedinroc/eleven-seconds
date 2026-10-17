@@ -4,7 +4,9 @@ import { playFake, startFake, toggleFakeOffline } from './fake'
 import { cycleLang, initLang } from './i18n'
 import { checkVerified, fillProposeTx } from './lookup'
 import { startChainWatch, selectProposal, tickReplay, toggleReplay } from './chainwatch'
-import { MODE, READ_ONLY } from './runtime'
+import { ARENA, MODE, READ_ONLY } from './runtime'
+import { attack as arenaAttack, startArena } from './arena'
+import { ARENA_PENDING } from './chaindata'
 import { connectServices, getDriver, postDriver } from './sse'
 import { store } from './store'
 import { CARDS, type CardId } from './types'
@@ -44,7 +46,10 @@ if (MODE === 'fake') {
 } else if (READ_ONLY) {
   // 云端只读版：区块头 + GuardedAdmin log 直接读测试网；不连 driver/哨兵/reporter
   blocks.start()
-  startChainWatch()
+  // arena：读的是独立部署（chain-data-arena.json）；部署档还没产生时不读链，只显示提示
+  if (!ARENA_PENDING) startChainWatch()
+  // arena：攻击卡打 /api/attack，每 1.5 秒读 /api/state 合并云端哨兵的判定细节
+  if (ARENA) startArena()
 } else {
   blocks.start()
   connectServices()
@@ -122,6 +127,11 @@ async function approveV2() {
 }
 
 function act(a: string) {
+  // arena 的攻击卡（云端 driver 送提案）；其他模式不认这个动作
+  if (a.startsWith('atk:')) {
+    if (ARENA) void arenaAttack(a.slice(4) as CardId)
+    return
+  }
   if (READ_ONLY && (a === 'judge' || a === 'approve' || a === 'kill' || a === 'reshuffle' || a.startsWith('p:'))) return
   if (a === 'replay') {
     if (READ_ONLY) toggleReplay()
@@ -187,5 +197,8 @@ document.addEventListener('keydown', (ev) => {
     ui.reportOpen = false
     ui.reportDismissedFor = store.activeId ?? ''
     mark()
-  } else if (['1', '2', '3', '4'].includes(k)) void propose(CARDS[Number(k) - 1].id, false)
+  } else if (['1', '2', '3', '4'].includes(k)) {
+    if (ARENA) act(`atk:${CARDS[Number(k) - 1].id}`)
+    else void propose(CARDS[Number(k) - 1].id, false)
+  }
 })

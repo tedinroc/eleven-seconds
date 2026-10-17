@@ -7,7 +7,9 @@ import { blockFontPx, explorerUrl, fmtGwei, fmtMon, plausibleBlockMs, reportAuto
 import { CARD_GUARDIAN, chainHealth, recentIds, replay, replayFrame } from './chainwatch'
 import { replayStage, type ReplayFrame } from './replay'
 import { cycleLang, lang, LANG_LABEL, LANGS, onLangChange, ruleText, srcName, stageName, statusChip, statusText, t, tLegacy, tm, tOr } from './i18n'
-import { CHAIN, HAS_COMMIT_STATE, LOCAL_TAG, MODE, ON_TESTNET, READ_ONLY, SENTINELS } from './runtime'
+import { ARENA, CHAIN, HAS_COMMIT_STATE, LOCAL_TAG, MODE, ON_TESTNET, READ_ONLY, SENTINELS } from './runtime'
+import { arena, waitLeft } from './arena'
+import { ARENA_PENDING } from './chaindata'
 import { short, store, type Proposal, type SentinelOnProposal } from './store'
 import { CARDS, type CardId, type CardInfo } from './types'
 
@@ -134,7 +136,7 @@ function renderStatic() {
       ? `<span class="ico">☠</span> ${t('att.h')} <span class="rp-pill">${t('rp.pill', { id: esc(RF.tl.id), b: RF.tl.proposeBlock.toLocaleString('en-US') })}${RF.paused ? t('rp.paused') : ''}</span>`
       : `<span class="ico">☠</span> ${t('att.h')} <small>${t('att.sub')}</small>`,
   )
-  patch('h-sen', `<span class="ico">⛨</span> ${t('sen.h')} <small>${t('sen.sub')}</small>`)
+  patch('h-sen', `<span class="ico">⛨</span> ${t('sen.h')} <small>${t(MODE === 'arena' ? 'sen.sub.arena' : 'sen.sub')}</small>`)
 }
 
 /** 语言切换钮：当前语言实色，其他半透明（沿用工具列按钮样式，不加 CSS 规则） */
@@ -150,8 +152,8 @@ const BLK_WIDTH = 396
 const BLK_MAX_PX = 84
 function renderTop() {
   const badge =
-    MODE === 'testnet' || MODE === 'chain'
-      ? `<span class="badge live${READ_ONLY ? ' chain' : ''}">● ${esc(tOr(`badge.${MODE}`, CHAIN.badge))}</span>`
+    MODE === 'testnet' || MODE === 'chain' || MODE === 'arena'
+      ? `<span class="badge live${READ_ONLY ? ' chain' : ''}${ARENA ? ' arena' : ''}">● ${esc(tOr(`badge.${MODE}`, CHAIN.badge))}</span>`
       : MODE === 'replay'
         ? `<span class="badge grey">${t('badge.replay')}</span>`
         : `<span class="badge grey dashed">${t('badge.fake')}</span>`
@@ -176,6 +178,10 @@ function renderTop() {
   const raw = blocks.blockTimeMs()
   const bt = plausibleBlockMs(raw, CONFIG.minPlausibleBlockMs)
   patch('bt', bt ? t('bt.measured', { s: (bt / 1000).toFixed(2) }) : raw !== null ? t('bt.fast') : t('bt.measuring'))
+  if (ARENA) {
+    patch('toolbar', arenaToolbar())
+    return
+  }
   if (READ_ONLY) {
     const ids = recentIds()
     const chips = ids
@@ -198,6 +204,64 @@ function renderTop() {
     `<button data-act="judge">${t('tb.judge')}</button><button data-act="table">${t('tb.table')}</button><button data-act="report">${t('tb.report')}</button>` +
       (MODE === 'fake' ? `<button data-act="kill">${t('tb.kill')}</button>` : `<button data-act="approve">${t('tb.approve')}</button>`) +
       `<span class="hint">${t('tb.propose')}<button data-act="p:evilMint">${t('tb.p1')}</button><button data-act="p:evilOwner">${t('tb.p2')}</button><button data-act="p:evilFee">${t('tb.p3')}</button><button data-act="p:v2">${t('tb.p4')}</button>${langButton()}</span>`,
+  )
+}
+
+// ---------- ?mode=arena 工具列：说明一句＋四张攻击卡＋送出状态＋T/R/P/语言＋最近提案 ----------
+function arenaStatus(now: number): string {
+  if (ARENA_PENDING) return `<span class="ar-st warn">${t('ar.pending')}</span>`
+  const st = arena.status
+  const left = waitLeft(now)
+  const name = (c: CardId) => esc(t(`ar.card.${c}` as never).replace(/^[☠✓]\s*/, ''))
+  let main = ''
+  let cls = ''
+  if (st?.kind === 'sending') main = t('ar.sending')
+  else if (st?.kind === 'sent') {
+    main = st.id ? t('ar.sent', { id: esc(st.id), card: name(st.card) }) : t('ar.sentNoId', { card: name(st.card) })
+    cls = 'good'
+  } else if (st?.kind === 'error') {
+    main = t('ar.error', { err: esc(st.err) })
+    cls = 'bad'
+  } else if (st?.kind === 'timeout') {
+    main = t('ar.timeout', { card: name(st.card) })
+    cls = 'warn'
+  }
+  // 倒数：刚送出的接在「已送出」后面；其他情况（429、云端忙）单独一句
+  if (left > 0) {
+    const wait = st?.kind === 'sent' ? t('ar.again', { s: left }) : t(arena.busy && st?.kind !== 'limited' ? 'ar.busy' : 'ar.limited', { s: left })
+    main = main ? `${main} · ${wait}` : wait
+    if (!cls) cls = 'warn'
+  } else if (st?.kind === 'limited') {
+    main = t('ar.ready')
+    cls = 'good'
+  }
+  if (!main) return arena.stateErr && arena.primed ? `<span class="ar-st dim">${t('ar.stateDown')}</span>` : ''
+  return `<span class="ar-st ${cls}" role="status">${main}</span>`
+}
+
+function arenaToolbar(): string {
+  const now = Date.now()
+  const off = ARENA_PENDING || !!arena.sending || waitLeft(now) > 0
+  const cards = CARDS.map((c, i) => {
+    const label = t(`ar.card.${c.id}` as never)
+    const title = t('ar.cardTitle', { name: c.name, desc: cardDesc(c), k: i + 1 })
+    return `<button data-act="atk:${c.id}" class="atk ${c.expect}${arena.sending === c.id ? ' busy' : ''}"${off ? ' disabled' : ''} title="${esc(title)}">${esc(label)}</button>`
+  }).join('')
+  // 宽屏舞台上放得下几个就显示几个（.ar-hint 只留一行高，折到第二行的整颗隐藏）；手机版全显示
+  const ids = recentIds()
+  const chips = ids
+    .map((id) => {
+      const p = store.proposals.get(id)!
+      const st = p.chain?.status
+      const cls = st === 2 ? 'bad' : st === 3 ? 'good' : ''
+      return `<button data-act="sel:${esc(id)}" class="${(RF ? RF.tl.id : store.activeId) === id ? 'on' : ''}"><b class="${cls}">#${esc(id)}</b> ${esc(st !== undefined ? statusChip(st) : '…')}</button>`
+    })
+    .join('')
+  return (
+    `<span class="ro ar-lede">${t('ar.lede')}</span>` +
+    `<div class="atk-row" role="group" aria-label="${esc(t('ar.lede'))}">${cards}</div>` +
+    arenaStatus(now) +
+    `<span class="hint ar-hint"><button data-act="table">${t('tb.table')}</button><button data-act="report">${t('r.title')}</button><button data-act="replay" class="rp-btn${replay.paused ? ' paused' : ''}" title="${esc(`${replay.paused ? t('rp.resumeFull') : t('rp.pauseFull')} · ${t('rp.btnTitle')}`)}" aria-label="${esc(replay.paused ? t('rp.resumeFull') : t('rp.pauseFull'))}">${replay.paused ? t('rp.resume') : t('rp.pause')}</button>${langButton()}${chips}</span>`
   )
 }
 
@@ -252,7 +316,9 @@ function renderAttacker(p: Proposal | null) {
   if (!p) {
     patch(
       'pcard',
-      READ_ONLY
+      ARENA
+        ? `<div class="empty">${chainHealth.loadedRecent || ARENA_PENDING ? t('ar.emptyLoaded') : t('att.emptyChainLoading')}<br><small>${t('ar.emptySub')}</small></div>`
+        : READ_ONLY
         ? `<div class="empty">${chainHealth.loadedRecent ? t('att.emptyChainLoaded') : t('att.emptyChainLoading')}<br><small>${t('att.emptyChainSub')}</small></div>`
         : `<div class="empty">${t('att.empty')}<br><small>${t('att.emptySub')}</small></div>`,
     )
@@ -352,15 +418,17 @@ function renderSentinelChain(s: string, p: Proposal | null) {
   let verdict = `<span class="dim">${t('s.noAction')}</span>`
   let veto = ''
   const sp = p?.sentinels[s]
+  // arena：云端哨兵回报的模拟毫秒（/api/state）
+  const sim = ARENA && sp?.simMs !== undefined ? ` <span class="dim">${t('s.simMs', { ms: sp.simMs })}</span>` : ''
   if (p && sp) {
     if (sp.verdict === 'veto') {
       const r = sp.rule ?? '?'
       const rc = sp.receipt
       const used = rc?.block && p.proposeBlock ? rc.block - p.proposeBlock : null
-      verdict = `<span class="bad">${t('s.veto')}</span> <b>${esc(r.split('_')[0])}</b> ${esc(ruleText(r))}`
+      verdict = `<span class="bad">${t('s.veto')}</span> <b>${esc(r.split('_')[0])}</b> ${esc(ruleText(r))}${sim}`
       veto = `<div class="barlabel">${t('s.vetoedLine', { tx: txLink(sp.vetoTx), b: rc?.block ?? '?', used: used !== null ? t('s.usedAfter', { n: used }) : '' })}</div>${stageBar(rc?.block ?? null)}`
     } else if (sp.verdict === 'pass') {
-      verdict = `<span class="good">${t('s.noVeto')}</span> ${t('s.noVetoSub')}`
+      verdict = sim ? `<span class="good">${t('s.pass')}</span> ${t('s.passSub')}${sim}` : `<span class="good">${t('s.noVeto')}</span> ${t('s.noVetoSub')}`
       veto = `<div class="barlabel dim">${t('s.passNoTx')}</div>`
     } else if (p.chain?.status === 2) {
       verdict = `<span class="dim">${t('s.otherVetoed')}</span>`
@@ -371,7 +439,7 @@ function renderSentinelChain(s: string, p: Proposal | null) {
   patch(
     `s-${s}`,
     `<div class="scard-in">
-      <div class="s-head"><b>${t('s.name', { n })}</b> <span class="chip on">guardian</span> <span class="dim">${addrLink(g, 4)}</span></div>
+      <div class="s-head"><b>${t('s.name', { n })}</b> ${ARENA ? (arena.health[s]?.online === false ? `<span class="chip off">${t('s.offline')}</span>` : `<span class="chip on">${t('ar.cloud')}</span>`) + ' ' : ''}<span class="chip on">guardian</span> <span class="dim">${addrLink(g, 4)}</span></div>
       <div class="s-verdict">${verdict}</div>
       <div class="s-veto">${veto}</div>
     </div>`,
@@ -534,7 +602,8 @@ function renderReport(p: Proposal | null, show: boolean) {
   el.classList.toggle('manual', ui.reportOpen)
   if (!show) return
   const close = `<button data-act="close-report" title="${esc(t('r.closeTitle'))}">✕</button>`
-  if (READ_ONLY) {
+  // arena：/api/state 给了报告全文就照 S2 版面显示全文（否则同 chain 只显示链上哈希）
+  if (READ_ONLY && !(ARENA && p?.report.text)) {
     const r = p?.report
     patch(
       'ov-report',

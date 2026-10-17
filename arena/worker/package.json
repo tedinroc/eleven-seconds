@@ -1,0 +1,22 @@
+{
+  "name": "eleven-seconds-arena-worker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Arena cloud engine: one Durable Object that runs three cloud sentinels and the attack driver against a separate GuardedAdmin deployment.",
+  "scripts": {
+    "bundle-config": "node scripts/bundle-config.mjs",
+    "check": "node scripts/bundle-config.mjs && wrangler deploy --dry-run --outdir .wrangler/dist",
+    "dev": "wrangler dev --port 8787",
+    "e2e": "node test/e2e-anvil.mjs",
+    "test": "node --test test/unit.test.mjs"
+  },
+  "dependencies": {
+    "viem": "2.57.2"
+  },
+  "devDependencies": {
+    "wrangler": "3.114.17"
+  },
+  "engines": { "node": ">=22" },
+  "license": "MIT"
+}

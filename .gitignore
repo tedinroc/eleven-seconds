@@ -33,3 +33,8 @@ reporter/reports/
 
 # demo/up.sh logs and PIDs
 .demo/
+
+# web ?mode=arena build output
+web/dist-arena/
+arena/pages/dist/
+arena/pages/.wrangler/

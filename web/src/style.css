@@ -1557,3 +1557,110 @@ html.layout-stack .rp-pill {
 .toolbar button.rp-btn {
   padding: 5px 8px;
 }
+
+/* ---------- ?mode=arena（云端互动版）：只作用在 arena 专用的 class 上，其他模式不受影响 ---------- */
+/* 工具列四行（说明、攻击卡、状态、T/R/P/语言＋最近提案）要塞进顶栏 108px：行距收紧 */
+.toolbar:has(.atk-row) {
+  gap: 4px;
+  /* 顶栏中间栏是 1fr：不让按钮列的最小宽度把整个舞台撑宽 */
+  min-width: 0;
+}
+.badge.arena {
+  background: linear-gradient(90deg, var(--live), #b04fd8);
+}
+.toolbar .ar-lede {
+  font-size: 13px;
+  line-height: 16px;
+}
+.toolbar .atk-row {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+}
+.toolbar button.atk {
+  font-size: 15px;
+  padding: 4px 9px;
+  border-width: 2px;
+  white-space: nowrap;
+}
+.toolbar button.atk.veto {
+  border-color: #8a2d33;
+  background: #2b1215;
+}
+.toolbar button.atk.pass {
+  border-color: #23744b;
+  background: #0f2a1d;
+}
+.toolbar button.atk:hover:not(:disabled),
+.toolbar button.atk:focus-visible {
+  filter: brightness(1.35);
+}
+.toolbar button.atk:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.toolbar button.atk.busy {
+  opacity: 1;
+  outline: 2px solid var(--warn);
+}
+.toolbar .ar-hint {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  /* 只留一行：放不下的最近提案整颗折到第二行而被隐藏，不会压到下方面板 */
+  max-height: 26px;
+  overflow: hidden;
+}
+.toolbar .ar-hint button {
+  margin-left: 0;
+}
+.ar-st {
+  width: 100%;
+  font-size: 13px;
+  line-height: 16px;
+  text-align: center;
+  font-weight: 700;
+  color: var(--fg);
+}
+.ar-st.good {
+  color: var(--good);
+}
+.ar-st.bad {
+  color: var(--bad);
+}
+.ar-st.warn {
+  color: var(--warn);
+}
+.ar-st.dim {
+  color: var(--dim);
+  font-weight: 500;
+}
+/* 手机／直式：攻击卡是 2×2 大按钮（≥ 52px 高，手指好按） */
+html.layout-stack .toolbar .atk-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+html.layout-stack .toolbar button.atk {
+  min-height: 52px;
+  font-size: 17px;
+  white-space: normal;
+}
+html.layout-stack .toolbar .ar-lede {
+  font-size: 15px;
+  text-align: left;
+}
+html.layout-stack .toolbar .ar-hint {
+  justify-content: flex-start;
+  gap: 8px;
+  max-height: none;
+  overflow: visible;
+}
+html.layout-stack .ar-st {
+  font-size: 15px;
+  line-height: 1.35;
+  text-align: left;
+}

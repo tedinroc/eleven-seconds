@@ -1,0 +1,14 @@
+{
+  "name": "eleven-seconds-arena-pages",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Pages project eleven-seconds-arena: the war room page (web/ built with --mode arena) plus a Pages Function that forwards /api/* to the arena engine Worker through a service binding.",
+  "scripts": {
+    "build": "npm --prefix ../../web run build:arena && node scripts/copy-dist.mjs",
+    "test": "node --test test/function.test.mjs",
+    "dev": "npx -y wrangler@3 pages dev --port 8788",
+    "deploy": "node ../../web/scripts/sync-arena-data.mjs --require && npm run build && npx -y wrangler@3 pages deploy --project-name eleven-seconds-arena --branch main --commit-dirty=true"
+  },
+  "license": "MIT"
+}

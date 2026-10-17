@@ -1,0 +1,67 @@
+name = "eleven-seconds-arena-engine"
+main = "src/index.mjs"
+compatibility_date = "2025-07-18"
+# No public hostname: no workers.dev subdomain, no preview URLs, no routes. The Pages project
+# eleven-seconds-arena reaches this Worker only through a service binding (see ../README.md).
+workers_dev = false
+preview_urls = false
+
+# Every minute: make sure the Arena Durable Object alarm loop is armed (it re-arms itself every tick).
+[triggers]
+crons = ["* * * * *"]
+
+# Bundle-time config: deployments json, ABIs, rules.json and gas.json are frozen into
+# src/generated/config.mjs before every `wrangler dev` / `wrangler deploy`.
+[build]
+command = "node scripts/bundle-config.mjs"
+watch_dir = "src"
+
+# One copy of viem for this Worker and for the sentinel/reporter modules it imports; node:fs is only
+# referenced (never called) by those modules' file loaders, so it is replaced by an inert shim.
+[alias]
+"viem" = "./node_modules/viem/_esm/index.js"
+"viem/accounts" = "./node_modules/viem/_esm/accounts/index.js"
+"node:fs" = "./src/shims/fs.mjs"
+
+[observability]
+enabled = true
+
+[[durable_objects.bindings]]
+name = "ARENA"
+class_name = "Arena"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Arena"]
+
+[vars]
+# Reads, polling and receipts (in order, failover on transport errors / 429 / 5xx). The official
+# endpoint limits each client IP to 15 req/s and Workers share egress IPs, so it is not a read RPC.
+READ_RPCS = "https://rpc.ankr.com/monad_testnet,https://10143.rpc.thirdweb.com"
+# eth_simulateV1: only thirdweb and the official endpoint support it (thirdweb first, official as the one retry).
+SIM_RPCS = "https://10143.rpc.thirdweb.com,https://testnet-rpc.monad.xyz"
+# Raw transactions go to all of these at once; any acceptance counts.
+BROADCAST_RPCS = "https://10143.rpc.thirdweb.com,https://rpc.ankr.com/monad_testnet,https://testnet-rpc.monad.xyz"
+# Alarm period while a proposal is in flight (and for ACTIVE_LINGER_SEC after), and while idle.
+TICK_MS = "1000"
+IDLE_TICK_MS = "4000"
+ACTIVE_LINGER_SEC = "60"
+GETLOGS_MAX_RANGE = "100"
+# Abuse limits for POST /api/attack.
+IP_COOLDOWN_SEC = "45"
+HOURLY_MAX = "40"
+DAILY_MAX = "300"
+# Fees: priority fee floor (gwei); veto/attachReason gas = gas.json limit x GAS_HEADROOM.
+MIN_PRIORITY_GWEI = "10"
+GAS_HEADROOM = "1.25"
+# Simulation timeouts (ms): one request, and the whole budget including the one retry.
+SIM_TIMEOUT_MS = "2500"
+SIM_BUDGET_MS = "5000"
+RPC_TIMEOUT_MS = "4000"
+STRICT = "0"
+# "independent": every sentinel simulates on its own; "shared": one simulation, three signatures.
+SIM_MODE = "independent"
+SIM_STAGGER_MS = "150"
+# Optional comma-separated list of origins allowed by CORS (empty = same-origin only, via Pages).
+ALLOW_ORIGINS = ""
+# Secrets (wrangler secret put, never here): ADMIN_KEY, SENTINEL1_KEY, SENTINEL2_KEY, SENTINEL3_KEY.

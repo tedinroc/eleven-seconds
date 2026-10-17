@@ -1,0 +1,11 @@
+# Cloudflare Pages 专案 eleven-seconds-arena（云端互动版战情室，独立于现场 demo 的网址）。部署（主持人）：
+#   cd arena/pages && npm run deploy
+# 静态页来自 web/（npm run build:arena → web/dist-arena，由 scripts/copy-dist.mjs 复制到 ./dist）。
+# functions/api/[[path]].ts 把 /api/* 经下面的 service binding 原样转发给 arena 引擎 Worker。
+name = "eleven-seconds-arena"
+pages_build_output_dir = "./dist"
+compatibility_date = "2025-07-18"
+
+[[services]]
+binding = "ARENA"
+service = "eleven-seconds-arena-engine"

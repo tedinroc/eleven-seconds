@@ -5,9 +5,11 @@
 // 运行期覆盖（URL 参数，方便现场切换，不必重新 build）：
 //   ?mode=testnet | replay | fake | chain   模式（默认见 defaultMode；云端版 vite build --mode cloud 默认 chain）
 //     chain：浏览器直连 Monad 测试网唯读（不连 driver/哨兵/reporter），见 chainwatch.ts
+//     arena：云端互动版（独立部署 10143-arena.json）：画面同 chain，另有攻击卡按钮打 /api（Pages Function → Worker），见 arena.ts
+//            npm run build:arena 默认 arena
 //   ?anvil=8548                       本机重演模式连哪个 anvil 端口（默认 8545）
 
-export type AppMode = 'testnet' | 'replay' | 'fake' | 'chain'
+export type AppMode = 'testnet' | 'replay' | 'fake' | 'chain' | 'arena'
 
 export interface ChainConfig {
   chainId: number
@@ -57,6 +59,17 @@ export const CONFIG = {
       explorerAddr: 'https://testnet.monadvision.com/address/',
       sourcifyApi: 'https://sourcify-api-monad.blockvision.org/v2/contract/10143/',
     } satisfies ChainConfig,
+    /** 云端互动版（?mode=arena）：读链方式同 chain，读的是独立的 arena 部署（src/chain-data-arena.json） */
+    arena: {
+      chainId: 10143,
+      badge: 'Monad 测试网 · 云端互动',
+      ws: ['wss://testnet-rpc.monad.xyz'],
+      http: ['https://testnet-rpc.monad.xyz', 'https://rpc.ankr.com/monad_testnet'],
+      headsMethod: 'monadNewHeads',
+      explorerTx: 'https://testnet.monadvision.com/tx/',
+      explorerAddr: 'https://testnet.monadvision.com/address/',
+      sourcifyApi: 'https://sourcify-api-monad.blockvision.org/v2/contract/10143/',
+    } satisfies ChainConfig,
     replay: {
       chainId: 31337,
       badge: '本机重演',
@@ -69,6 +82,17 @@ export const CONFIG = {
     } satisfies ChainConfig,
   },
   defaultAnvilPort: 8545,
+
+  /** ?mode=arena：同源 /api（Pages Function 经 service binding 转发到 arena Worker） */
+  arena: {
+    apiBase: '/api',
+    /** GET /api/state 轮询间隔 */
+    statePollMs: 1500,
+    /** GET /api/state 单次逾时 */
+    timeoutMs: 8000,
+    /** POST /api/attack 逾时：Worker 最多等 12 秒拿提案收据（拿不到回 202），这里要比它长 */
+    attackTimeoutMs: 20000,
+  },
 
   /** 本机服务（spec 第 5 节端口表） */
   services: {

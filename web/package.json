@@ -8,10 +8,13 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "typecheck": "tsc",
-    "selftest": "rolldown test/selftest.ts -p node -f esm -o node_modules/.cache/eleven-selftest.mjs && node node_modules/.cache/eleven-selftest.mjs",
+    "selftest": "rolldown test/selftest.ts -p node -f esm -o node_modules/.cache/eleven-selftest.mjs && node node_modules/.cache/eleven-selftest.mjs && rolldown test/arena-selftest.ts -p node -f esm -o node_modules/.cache/eleven-arena-selftest.mjs && node node_modules/.cache/eleven-arena-selftest.mjs",
     "sync:chain": "node scripts/sync-chain-data.mjs",
     "build:cloud": "node scripts/sync-chain-data.mjs && tsc && vite build --mode cloud",
-    "deploy:cloud": "npm run build:cloud && npx -y wrangler@3 pages deploy dist --project-name eleven-seconds --branch main --commit-dirty=true"
+    "deploy:cloud": "npm run build:cloud && npx -y wrangler@3 pages deploy dist --project-name eleven-seconds --branch main --commit-dirty=true",
+    "sync:arena": "node scripts/sync-arena-data.mjs",
+    "build:arena": "node scripts/sync-arena-data.mjs && tsc && vite build --mode arena --outDir dist-arena",
+    "dev:arena": "vite --mode arena --port 5181"
   },
   "dependencies": {
     "viem": "2.57.2"

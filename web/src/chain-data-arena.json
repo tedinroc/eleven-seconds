@@ -1,0 +1,296 @@
+{
+  "pending": false,
+  "chainId": 10143,
+  "guardedAdmin": "0x1d286Ef4D622EFD91FeDe3560fB4Cff0D4ff0c59",
+  "proxy": "0x5E58083bA85add746592352D49d3Db8f4E5A1a95",
+  "delayBlocks": 30,
+  "deployBlock": 71767314,
+  "guardians": [
+    "0x94388d03ff52F249Cdf8f4ec9DE42f496FBcBdC8",
+    "0x6A2A54395Bc0f6C5D6a6dD29949D836eDb51fEc8",
+    "0xFdE6E4C48e7C5e9C4f01D3ED65560dc3F4dC7fBF"
+  ],
+  "impls": {
+    "evilFee": "0xa76c34017acC69112c06e03edD50d70eba33Bfa4",
+    "evilMint": "0xB6Ff139e673c7f6AEEC6F97dfa62D709d9C55707",
+    "evilOwner": "0xd4Cb90E027270d0C1ca79988cb6EDb6d8b5F8CBd",
+    "paused": "0xB2a9273bFd8E5c48493Bf918Fd785EE7eA1f534a",
+    "v1": "0xf178A3cB26fA659D4B6b2c5Fd6eA2A7ec759FBb5",
+    "v2": "0x1a591cFA4624f0540297B63D879772E9c6257323"
+  },
+  "abi": [
+    {
+      "type": "function",
+      "name": "delayBlocks",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint64",
+          "internalType": "uint64"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "getProposal",
+      "inputs": [
+        {
+          "name": "id",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "tuple",
+          "internalType": "struct GuardedAdmin.Proposal",
+          "components": [
+            {
+              "name": "kind",
+              "type": "uint8",
+              "internalType": "enum GuardedAdmin.Kind"
+            },
+            {
+              "name": "status",
+              "type": "uint8",
+              "internalType": "enum GuardedAdmin.Status"
+            },
+            {
+              "name": "proposer",
+              "type": "address",
+              "internalType": "address"
+            },
+            {
+              "name": "target",
+              "type": "address",
+              "internalType": "address"
+            },
+            {
+              "name": "value",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "codehash",
+              "type": "bytes32",
+              "internalType": "bytes32"
+            },
+            {
+              "name": "dataHash",
+              "type": "bytes32",
+              "internalType": "bytes32"
+            },
+            {
+              "name": "proposedBlock",
+              "type": "uint64",
+              "internalType": "uint64"
+            },
+            {
+              "name": "readyBlock",
+              "type": "uint64",
+              "internalType": "uint64"
+            },
+            {
+              "name": "vetoCount",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ]
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "nextId",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "event",
+      "name": "Executed",
+      "inputs": [
+        {
+          "name": "id",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "executor",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "Proposed",
+      "inputs": [
+        {
+          "name": "id",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "kind",
+          "type": "uint8",
+          "indexed": true,
+          "internalType": "uint8"
+        },
+        {
+          "name": "target",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "value",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "data",
+          "type": "bytes",
+          "indexed": false,
+          "internalType": "bytes"
+        },
+        {
+          "name": "codehash",
+          "type": "bytes32",
+          "indexed": false,
+          "internalType": "bytes32"
+        },
+        {
+          "name": "readyBlock",
+          "type": "uint64",
+          "indexed": false,
+          "internalType": "uint64"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "ReasonAttached",
+      "inputs": [
+        {
+          "name": "id",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "guardian",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
+        },
+        {
+          "name": "reportHash",
+          "type": "bytes32",
+          "indexed": false,
+          "internalType": "bytes32"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "Vetoed",
+      "inputs": [
+        {
+          "name": "id",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "guardian",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "ruleHash",
+          "type": "bytes32",
+          "indexed": false,
+          "internalType": "bytes32"
+        },
+        {
+          "name": "vetoCount",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    }
+  ],
+  "rules": [
+    {
+      "rule": "R1_TOTAL_SUPPLY",
+      "ruleHash": "0x2d882812e0d4af193fbd76c9ccddcbb70bac4eda3768abe4fe59cd4adb9e653f",
+      "zh": "陌生地址的调用改变了总供应量"
+    },
+    {
+      "rule": "R2_OWNER",
+      "ruleHash": "0x1391a3353c21683826f9e1baca10ec6ea865cbb0c2fccc79ca2576ff7b3fff5c",
+      "zh": "陌生地址的调用改变了 owner"
+    },
+    {
+      "rule": "R3_TRANSFER_CONSERVATION",
+      "ruleHash": "0xc9f9d67fbbc2a45f7581b3e9bba932191166ec039ec90827c569f8aafadf1733",
+      "zh": "转账不守恒"
+    },
+    {
+      "rule": "R4_TRANSFER_LIVENESS",
+      "ruleHash": "0x3f7267fd02341326ceb3a4b0186b8602e93dae2b479d68836312923739845caf",
+      "zh": "正常转账失败"
+    },
+    {
+      "rule": "R5_STRICT_CODEHASH",
+      "ruleHash": "0x1a949d6bf8fe3a2c5fa3a4e25356abc317413778f31b0f77a4d66f24bad7f63f",
+      "zh": "严格模式：codehash 未经预核准"
+    },
+    {
+      "rule": "R6_SIM_FAILURE",
+      "ruleHash": "0xe62cdf1612c9894dee94c4d593955a944e938f1340164eb639c5aeddff9c78dd",
+      "zh": "模拟失败或超时（fail-closed）"
+    },
+    {
+      "rule": "R7_CONFIG_GUARD",
+      "ruleHash": "0x74ebdb532eabdfd7ca8b00372b9f2a6c4cffcc0e5c510563f25a0288de814cc1",
+      "zh": "未经核准的守护配置变更"
+    },
+    {
+      "rule": "R8_INIT_DATA",
+      "ruleHash": "0x13457d3e5c6ea2bc05b029a6ab36c2e1adec22a31346274ab767acfe08f9e049",
+      "zh": "升级附带未核准的初始化数据"
+    },
+    {
+      "rule": "R3B_THIRD_PARTY_FUNDS",
+      "ruleHash": "0x454b6e9715bb51ee6eac05039a10eeb399b083f27a4f7c6f9d889756dfa3e214",
+      "zh": "陌生地址能动用别人的余额（未授权 transferFrom 或余额被改）"
+    },
+    {
+      "rule": "R9_NEW_OPCODES",
+      "ruleHash": "0x766e11dc2c5f99690e801f33107e733cccfe7ba712f5a72ab95d4020fbeb2b87",
+      "zh": "新合约出现了时间/外部调用类危险指令（定时炸弹嫌疑）"
+    }
+  ]
+}

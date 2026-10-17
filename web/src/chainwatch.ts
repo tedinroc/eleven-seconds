@@ -6,7 +6,7 @@
 // 全部是 eth_call / eth_getLogs / eth_getTransactionReceipt，不签名、不广播。
 import { decodeEventLog, decodeFunctionResult, encodeFunctionData, numberToHex, pad, toEventSelector, type Abi, type Hex } from 'viem'
 import { blocks } from './chain'
-import DATA from './chain-data.json'
+import { DATA } from './chaindata'
 import { msg } from './i18n'
 import { CHAIN, SENTINELS } from './runtime'
 import { short, store, type Proposal } from './store'
@@ -106,7 +106,8 @@ interface ChainProposal {
 }
 
 // ---------- 状态写入 store（沿用 S1 画面的 Proposal 结构） ----------
-function ensure(id: string): Proposal {
+/** arena.ts 也用：/api 回报的提案先建好，链上事件到了再补齐 */
+export function ensure(id: string): Proposal {
   let p = store.proposals.get(id)
   if (!p) {
     p = { id, kind: '0', target: '', codehash: '', proposeBlock: null, readyBlock: null, firstTs: Date.now(), sentinels: {}, report: { text: '', done: false, open: false } }
@@ -116,7 +117,8 @@ function ensure(id: string): Proposal {
   return p
 }
 
-function pickActive() {
+/** arena.ts 也用：新提案出现时切到最新一个（使用者手动选了旧提案就不切） */
+export function pickActive() {
   let best: Proposal | null = null
   for (const p of store.proposals.values()) if (!best || Number(p.id) > Number(best.id)) best = p
   if (best && store.activeId !== best.id && !manualPick) store.activeId = best.id
