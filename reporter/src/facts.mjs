@@ -259,7 +259,8 @@ export function buildFacts(sim, proposal, opts = {}) {
       : '',
     simMs,
     culprits,
-    culpritText: culprits.map((c) => c.selector).join('、'),
+    // 同一个选择器可能对应多个观察（例如 owner 与 totalSupply 都变了），句子里只列一次
+    culpritText: [...new Set(culprits.map((c) => c.selector))].join('、'),
     skimmedTo,
     skimText: skimmedTo.map((x) => x.text).join('、'),
     selectorsRemoved,
