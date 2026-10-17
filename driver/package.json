@@ -1,0 +1,13 @@
+{
+  "name": "eleven-seconds-driver",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check server.mjs && node --check lib.mjs"
+  },
+  "dependencies": {
+    "viem": "2.57.2"
+  }
+}

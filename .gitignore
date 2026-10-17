@@ -24,3 +24,9 @@ keystore/
 PREP-NOTES.md
 
 .claude/settings.local.json
+
+# Symlinked node_modules (a symlink is not matched by "node_modules/")
+node_modules
+# forge dry runs and local report archive
+broadcast/*/*/dry-run/
+reporter/reports/

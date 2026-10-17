@@ -1,0 +1,17 @@
+{
+  "name": "eleven-seconds-reporter",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AI risk report for sentinel sim_result events (local LM Studio, template fallback)",
+  "scripts": {
+    "start": "node src/reporter.mjs",
+    "test": "node test/selftest.mjs",
+    "selftest": "node test/selftest.mjs",
+    "probe-llm": "node tools/probe-llm.mjs"
+  },
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "viem": "2.57.2"
+  }
+}

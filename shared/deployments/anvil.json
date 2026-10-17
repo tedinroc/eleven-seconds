@@ -1,0 +1,48 @@
+{
+  "approver": "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc",
+  "chainId": 31337,
+  "codehashes": {
+    "evilFee": "0xe6fbfde45ea17b8b6c8cb54d3a3d9cc940350497738cd9bfbeb3ff53c059395f",
+    "evilMint": "0xcfbe77b285f6d2d913d017dfcc2cd18590b9b2ddbd4ab77ab339e4defd701f68",
+    "evilOwner": "0x82598a005afe4fda4aeefa00e492f32208753224d9f75e0feabebd81cbd31027",
+    "paused": "0x39e3654ebdf1aa2c7cc763dca1092193ee8dfa531974e40924500cb55dfab5fe",
+    "v1": "0xabe595489b9d6797b5be8abb8aece47c4ba194656fcc84b91b7e571a4f6b7eab",
+    "v2": "0xa82c68dea44388a1285d4f08bf1675b4af8571f4cf95a010ca852a5c1f5ff464"
+  },
+  "delayBlocks": 30,
+  "deployBlock": 8,
+  "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "guardedAdmin": "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853",
+  "guardians": [
+    "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+    "0x90F79bf6EB2c4f870365E785982E1f101E93b906",
+    "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
+  ],
+  "holderAmounts": [
+    10000000000,
+    5000000000,
+    2500000000
+  ],
+  "holders": [
+    "0x976EA74026E726554dB657fA54763abd0C3a0aa9",
+    "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955",
+    "0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f"
+  ],
+  "impls": {
+    "evilFee": "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707",
+    "evilMint": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9",
+    "evilOwner": "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
+    "paused": "0x0165878A594ca255338adfa4d48449f69242Eb8F",
+    "v1": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+    "v2": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+  },
+  "network": "anvil",
+  "owner": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+  "proxy": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+  "proxyAdmin": "0xCafac3dD18aC6c6e92c921884f9E4176737C052c",
+  "token": {
+    "decimals": 8,
+    "name": "DemoBTC",
+    "symbol": "dBTC"
+  }
+}

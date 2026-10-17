@@ -1,0 +1,54 @@
+{
+  "_meta": {
+    "source": "real tx receipts on anvil --network monad",
+    "tool": "forge Version: 1.8.5",
+    "measuredAt": "2026-10-17T03:33Z",
+    "multiplier": 1.1,
+    "note": "gasLimit = ceil(max gasUsed of the variants in _detail * 1.10). Monad charges gasLimit x price. execute covers upgrades with empty init data only."
+  },
+  "propose": {
+    "gasUsed": 145601,
+    "gasLimit": 160162
+  },
+  "veto": {
+    "gasUsed": 89535,
+    "gasLimit": 98489
+  },
+  "attachReason": {
+    "gasUsed": 40126,
+    "gasLimit": 44139
+  },
+  "execute": {
+    "gasUsed": 107277,
+    "gasLimit": 118005
+  },
+  "breakGlass": {
+    "gasUsed": 95004,
+    "gasLimit": 104505
+  },
+  "approveCodehash": {
+    "gasUsed": 51455,
+    "gasLimit": 56601
+  },
+  "_detail": {
+    "approveCodehash": 51455,
+    "proposeUpgrade": 145601,
+    "proposeUpgrade_evil": 145601,
+    "veto_first": 89535,
+    "veto_second": 72317,
+    "veto_third": 72317,
+    "veto_repeat": 49039,
+    "attachReason": 40126,
+    "proposeSetGuardian": 118015,
+    "proposeSetDelay": 117612,
+    "proposeSetPausedImpl": 145021,
+    "execute_upgrade": 104263,
+    "breakGlass": 95004,
+    "proposeUpgrade_unpause": 145601,
+    "execute_setGuardian": 58935,
+    "execute_setDelay": 45914,
+    "execute_setPausedImpl": 53340,
+    "execute_upgrade_unpause": 107277,
+    "execute_vetoed_revert": 29881
+  }
+}

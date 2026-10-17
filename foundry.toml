@@ -20,7 +20,11 @@ cbor_metadata = true
 # remapping to its (empty) git-submodule copy of openzeppelin-contracts.
 auto_detect_remappings = false
 
-fs_permissions = [{ access = "read", path = "./" }]
+fs_permissions = [
+  { access = "read", path = "./" },
+  { access = "read-write", path = "./shared/deployments" },
+  { access = "read-write", path = "./cache" },
+]
 
 [fuzz]
 runs = 1_000
@@ -40,8 +44,8 @@ monad_testnet_drpc = "https://monad-testnet.drpc.org"
 monad = "https://rpc.monad.xyz"
 
 # Contract verification (Sourcify on MonadVision). Foundry has no verifier key in foundry.toml, so the
-# verifier URL comes from the VERIFIER_URL env var (see .env.example) or scripts/deploy.sh:
-#   forge verify-contract <address> src/Counter.sol:Counter --chain 10143 \
+# verifier URL comes from the VERIFIER_URL env var (see .env.example) or script/deploy.sh (prints the commands):
+#   forge verify-contract <address> src/GuardedAdmin.sol:GuardedAdmin --chain 10143 \
 #     --verifier sourcify --verifier-url https://sourcify-api-monad.blockvision.org/ --watch
 # Fallback verifier URL: https://sourcify.dev/server/
 

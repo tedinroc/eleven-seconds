@@ -1,23 +1,156 @@
 import './style.css'
-import { publicClient } from './chain'
+import { blocks } from './chain'
+import { playFake, startFake, toggleFakeOffline } from './fake'
+import { MODE } from './runtime'
+import { connectServices, getDriver, postDriver } from './sse'
+import { store } from './store'
+import { CARDS, type CardId } from './types'
+import { judge, mountSkeleton, render, reportVisible, ui } from './ui'
 
-const app = document.querySelector<HTMLDivElement>('#app')!
+mountSkeleton()
 
-async function main() {
-  try {
-    const chainId = await publicClient.getChainId()
-    publicClient.watchBlockNumber({
-      emitOnBegin: true,
-      onBlockNumber: (n) => {
-        app.textContent = `connected to chain ${chainId}, block ${n}`
-      },
-      onError: (e) => {
-        app.textContent = `rpc error: ${e.message}`
-      },
-    })
-  } catch (e) {
-    app.textContent = `not connected: ${(e as Error).message}`
+let dirty = true
+const mark = () => {
+  dirty = true
+}
+store.onChange(mark)
+blocks.onChange(mark)
+function loop() {
+  if (dirty) {
+    dirty = false
+    render()
+  }
+  requestAnimationFrame(loop)
+}
+requestAnimationFrame(loop)
+// 离线判定靠时间流逝，定时重画
+setInterval(mark, 250)
+
+if (MODE === 'fake') {
+  startFake()
+} else {
+  blocks.start()
+  connectServices()
+  void loadDeployments()
+}
+
+/** 地址一律由 driver 读 shared/deployments/*.json 后提供，前端不写死位址 */
+async function loadDeployments() {
+  for (;;) {
+    try {
+      const d = await getDriver<{ impls?: Record<string, string> }>('/deployments')
+      const map: Record<string, CardId | 'v1' | 'paused'> = { evilMint: 'evilMint', evilOwner: 'evilOwner', evilFee: 'evilFee', v2: 'v2', v1: 'v1', paused: 'paused' }
+      for (const [k, addr] of Object.entries(d.impls ?? {})) if (map[k] && typeof addr === 'string') store.implNames.set(addr.toLowerCase(), map[k])
+      mark()
+      return
+    } catch {
+      await new Promise((r) => setTimeout(r, 3000))
+    }
   }
 }
 
-main()
+async function propose(card: CardId, isJudge: boolean) {
+  if (isJudge) {
+    judge.picked = card
+    judge.status = '提案送出中…'
+  }
+  if (MODE === 'fake') {
+    store.pendingJudge = isJudge
+    playFake(card)
+    if (isJudge) {
+      judge.pickedId = store.activeId
+      judge.status = '已送出（假事件）。判定后翻牌。'
+      ui.judgeOpen = false
+    }
+    mark()
+    return
+  }
+  try {
+    const r = await postDriver<{ id: string; txHash: string; proposeBlock: number; readyBlock: number; target: string; codehash: string }>('/propose', { card })
+    store.noteProposed(String(r.id), card, isJudge, r)
+    if (isJudge) {
+      judge.pickedId = String(r.id)
+      judge.status = `已送出提案 #${r.id}。判定后翻牌。`
+      ui.judgeOpen = false
+    }
+    store.log('driver', 'propose', `送出提案 #${r.id}${isJudge ? '（评委蒙牌）' : `（${CARDS.find((c) => c.id === card)?.name}）`} tx ${r.txHash.slice(0, 10)}…`, 'info')
+  } catch (e) {
+    const msg = (e as Error).message
+    if (isJudge) {
+      judge.status = `送出失败：${msg}`
+      judge.picked = null
+    }
+    store.log('driver', 'propose', `提案失败：${msg}`, 'warn')
+  }
+  mark()
+}
+
+/** 严格模式（R5）用：approver 预核准 v2 的 codehash */
+async function approveV2() {
+  try {
+    const r = await postDriver<{ codehash: string; txHash: string }>('/approve', { card: 'v2' })
+    store.log('driver', 'approve', `approver 已核准 v2 codehash ${r.codehash.slice(0, 10)}… tx ${r.txHash.slice(0, 10)}…`, 'good')
+  } catch (e) {
+    store.log('driver', 'approve', `核准失败：${(e as Error).message}`, 'warn')
+  }
+  mark()
+}
+
+function act(a: string) {
+  if (a === 'judge') {
+    ui.judgeOpen = !ui.judgeOpen
+    ui.tableOpen = false
+  } else if (a === 'table') {
+    ui.tableOpen = !ui.tableOpen
+    ui.judgeOpen = false
+  } else if (a === 'report') {
+    if (reportVisible()) {
+      ui.reportOpen = false
+      ui.reportDismissedFor = store.activeId ?? ''
+    } else {
+      ui.reportOpen = true
+    }
+  } else if (a === 'close-report') {
+    ui.reportOpen = false
+    ui.reportDismissedFor = store.activeId ?? ''
+  } else if (a === 'close-judge') ui.judgeOpen = false
+  else if (a === 'close-table') ui.tableOpen = false
+  else if (a === 'reshuffle') {
+    judge.order = CARDS.map((c) => c.id)
+    for (let i = judge.order.length - 1; i > 0; i--) {
+      const j = crypto.getRandomValues(new Uint32Array(1))[0] % (i + 1)
+      ;[judge.order[i], judge.order[j]] = [judge.order[j], judge.order[i]]
+    }
+    judge.picked = null
+    judge.pickedId = null
+    judge.status = ''
+  } else if (a === 'kill' && MODE === 'fake') toggleFakeOffline('sentinel-3')
+  else if (a.startsWith('p:')) void propose(a.slice(2) as CardId, false)
+  else if (a === 'approve' && MODE !== 'fake') void approveV2()
+  mark()
+}
+
+document.addEventListener('click', (ev) => {
+  const t = ev.target as HTMLElement
+  const btn = t.closest<HTMLElement>('[data-act]')
+  if (btn) return act(btn.dataset.act!)
+  const card = t.closest<HTMLElement>('[data-card]')
+  if (card && !judge.picked) void propose(card.dataset.card as CardId, true)
+})
+
+document.addEventListener('keydown', (ev) => {
+  if (ev.metaKey || ev.ctrlKey || ev.altKey) return
+  const k = ev.key.toLowerCase()
+  if (k === 'j') act('judge')
+  else if (k === 't') act('table')
+  else if (k === 'r') act('report')
+  else if (k === 'k') act('kill')
+  else if (k === 'a') act('approve')
+  else if (k === 'escape') {
+    ui.judgeOpen = false
+    ui.tableOpen = false
+    ui.reportOpen = false
+    ui.reportDismissedFor = store.activeId ?? ''
+    mark()
+  } else if (['1', '2', '3', '4'].includes(k)) void propose(CARDS[Number(k) - 1].id, false)
+})

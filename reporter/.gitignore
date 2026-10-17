@@ -1,0 +1,4 @@
+node_modules/
+# Reports are produced at demo time (full text + keccak256); keep them out of git.
+reports/*
+!reports/.gitkeep

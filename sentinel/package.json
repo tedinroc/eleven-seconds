@@ -1,0 +1,20 @@
+{
+  "name": "sentinel",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Upgrade-cooldown sentinel: watches Proposed events, simulates the new implementation with eth_simulateV1 and vetoes on invariant violations.",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/main.mjs",
+    "fake": "node fake-events.mjs",
+    "anvil": "sh run.sh anvil",
+    "testnet": "sh run.sh testnet",
+    "fixtures": "node test-fixtures/deploy.mjs",
+    "e2e": "node test/e2e-anvil.mjs",
+    "test": "node --test test/unit.test.mjs"
+  },
+  "dependencies": {
+    "viem": "2.57.2"
+  }
+}

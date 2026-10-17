@@ -1,0 +1,62 @@
+{
+  "v": 1,
+  "hash": "keccak256(utf8(id))",
+  "rules": [
+    {
+      "rule": "R1_TOTAL_SUPPLY",
+      "id": "GUARD/R1_TOTAL_SUPPLY",
+      "ruleHash": "0x2d882812e0d4af193fbd76c9ccddcbb70bac4eda3768abe4fe59cd4adb9e653f",
+      "zh": "陌生地址的调用改变了总供应量",
+      "threat": "T1"
+    },
+    {
+      "rule": "R2_OWNER",
+      "id": "GUARD/R2_OWNER",
+      "ruleHash": "0x1391a3353c21683826f9e1baca10ec6ea865cbb0c2fccc79ca2576ff7b3fff5c",
+      "zh": "陌生地址的调用改变了 owner",
+      "threat": "T2"
+    },
+    {
+      "rule": "R3_TRANSFER_CONSERVATION",
+      "id": "GUARD/R3_TRANSFER_CONSERVATION",
+      "ruleHash": "0xc9f9d67fbbc2a45f7581b3e9bba932191166ec039ec90827c569f8aafadf1733",
+      "zh": "转账不守恒",
+      "threat": "T3"
+    },
+    {
+      "rule": "R4_TRANSFER_LIVENESS",
+      "id": "GUARD/R4_TRANSFER_LIVENESS",
+      "ruleHash": "0x3f7267fd02341326ceb3a4b0186b8602e93dae2b479d68836312923739845caf",
+      "zh": "正常转账失败",
+      "threat": "brick"
+    },
+    {
+      "rule": "R5_STRICT_CODEHASH",
+      "id": "GUARD/R5_STRICT_CODEHASH",
+      "ruleHash": "0x1a949d6bf8fe3a2c5fa3a4e25356abc317413778f31b0f77a4d66f24bad7f63f",
+      "zh": "严格模式：codehash 未经预核准",
+      "threat": "timebomb"
+    },
+    {
+      "rule": "R6_SIM_FAILURE",
+      "id": "GUARD/R6_SIM_FAILURE",
+      "ruleHash": "0xe62cdf1612c9894dee94c4d593955a944e938f1340164eb639c5aeddff9c78dd",
+      "zh": "模拟失败或超时（fail-closed）",
+      "threat": "T8"
+    },
+    {
+      "rule": "R7_CONFIG_GUARD",
+      "id": "GUARD/R7_CONFIG_GUARD",
+      "ruleHash": "0x74ebdb532eabdfd7ca8b00372b9f2a6c4cffcc0e5c510563f25a0288de814cc1",
+      "zh": "未经核准的守护配置变更",
+      "threat": "T4/T5"
+    },
+    {
+      "rule": "R8_INIT_DATA",
+      "id": "GUARD/R8_INIT_DATA",
+      "ruleHash": "0x13457d3e5c6ea2bc05b029a6ab36c2e1adec22a31346274ab767acfe08f9e049",
+      "zh": "升级附带未核准的初始化数据",
+      "threat": "T9"
+    }
+  ]
+}
