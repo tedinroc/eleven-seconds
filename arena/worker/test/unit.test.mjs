@@ -41,12 +41,36 @@ test('broadcast: any acceptance or "already known" delivers; nonce errors are fl
   assert.equal(out.nonceError, true)
 })
 
-test('report is the reporter template and its hash is keccak256(utf8(text))', () => {
-  const sim = { id: 7, verdict: 'veto', rule: 'R1_TOTAL_SUPPLY', checks: [{ name: 'R1_TOTAL_SUPPLY', before: '100', after: '200', ok: false }], selectorsAdded: [], simMs: 900, extra: {} }
-  const r = makeReport(sim, { id: 7, kind: 0, target: '0x' + '11'.repeat(20), codehash: '0x' + '22'.repeat(32), proposeBlock: 10, readyBlock: 40 })
+const SIM7 = { id: 7, verdict: 'veto', rule: 'R1_TOTAL_SUPPLY', checks: [{ name: 'R1_TOTAL_SUPPLY', before: '100', after: '200', ok: false }], selectorsAdded: [], simMs: 900, extra: {} }
+const PROP7 = { id: 7, kind: 0, target: '0x' + '11'.repeat(20), codehash: '0x' + '22'.repeat(32), proposeBlock: 10, readyBlock: 40 }
+
+test('without Workers AI the report is the reporter template and its hash is keccak256(utf8(text))', async () => {
+  const r = await makeReport(SIM7, PROP7)
   assert.ok(r.text.includes('#7'))
+  assert.equal(r.template, true)
   assert.equal(r.hash, keccak256(stringToBytes(r.text)))
   assert.equal(r.rule, 'R1_TOTAL_SUPPLY')
+})
+
+test('Workers AI wording is used when it passes the reporter guard', async () => {
+  const ai = { run: async (model, input) => ({ response: '<think>\n\n</think>\n提案 #7 被否决：总供应量被改变，存在无限增发风险。建议多签维持否决并更换密钥。' }) }
+  const r = await makeReport(SIM7, PROP7, { ai })
+  assert.equal(r.template, false)
+  assert.equal(r.model, '@cf/qwen/qwen3-30b-a3b-fp8')
+  assert.ok(r.text.startsWith('提案 #7') && !r.text.includes('think'))
+  assert.equal(r.hash, keccak256(stringToBytes(r.text)))
+})
+
+test('Workers AI output with an invented number, an error or a timeout falls back to the template', async () => {
+  const invented = { run: async () => ({ response: '提案 #7 被否决，损失约 999 万美元。建议多签维持否决。' }) }
+  const broken = { run: async () => { throw new Error('upstream 503') } }
+  const slow = { run: () => new Promise(() => {}) }
+  for (const [ai, why] of [[invented, /unsupported_number/], [broken, /503/], [slow, /timeout/]]) {
+    const r = await makeReport(SIM7, PROP7, { ai, timeoutMs: 50 })
+    assert.equal(r.template, true)
+    assert.match(r.fallbackReason, why)
+    assert.ok(r.text.includes('#7'))
+  }
 })
 
 test('bundle-config refuses the live demo deployment', () => {

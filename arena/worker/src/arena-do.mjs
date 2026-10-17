@@ -385,13 +385,13 @@ export class Arena extends DurableObject {
       await this.save()
     }
 
-    // Report: the reporter's template from the first vetoing sentinel's result (or sentinel 1's pass).
+    // Report: Workers AI wording (template fallback) from the first vetoing sentinel's result (or sentinel 1's pass).
     const src = vetoing[0] ?? rec.sentinels[0]
     try {
       const sim = { id: rec.id, verdict: src.verdict, rule: src.rule, ruleHash: src.ruleHash, checks: src.checks, selectorsAdded: src.selectorsAdded, simMs: src.simMs, extra: src.extra, mode: 'testnet' }
       const prop = { id: rec.id, kind: rec.kind, target: rec.target, codehash: rec.codehash, proposeBlock: rec.proposeBlock, readyBlock: rec.readyBlock }
-      const r = makeReport(sim, prop, { decimals: D.decimals, symbol: D.symbol })
-      rec.report = { ...(rec.report ?? {}), text: r.text, hash: r.hash, template: true, rule: r.rule, bySentinel: src.index }
+      const r = await makeReport(sim, prop, { decimals: D.decimals, symbol: D.symbol, ai: this.env.AI })
+      rec.report = { ...(rec.report ?? {}), text: r.text, hash: r.hash, template: r.template, model: r.model, fallbackReason: r.fallbackReason, genMs: r.ms, rule: r.rule, bySentinel: src.index }
     } catch (e) {
       this.noteError(`report #${rec.id}`, e)
     }
@@ -564,6 +564,7 @@ export class Arena extends DurableObject {
     }
     return {
       ok: ok && problems.length === 0,
+      build: 'ai-report-3',
       lastBlock: this.s.lastBlock,
       cursor: this.s.cursor,
       lastTickAt: e.lastTickAt,

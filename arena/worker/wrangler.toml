@@ -65,3 +65,7 @@ SIM_STAGGER_MS = "150"
 # Optional comma-separated list of origins allowed by CORS (empty = same-origin only, via Pages).
 ALLOW_ORIGINS = ""
 # Secrets (wrangler secret put, never here): ADMIN_KEY, SENTINEL1_KEY, SENTINEL2_KEY, SENTINEL3_KEY.
+
+# Workers AI: Qwen3 words the risk report (template fallback in src/report.mjs).
+[ai]
+binding = "AI"
