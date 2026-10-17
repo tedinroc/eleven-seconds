@@ -169,7 +169,7 @@ async function fakeLm({ text = '', tokenMs = 10, firstDelayMs = 0, hang = false 
   const srv = http.createServer((req, res) => {
     if (req.url === '/v1/models') {
       res.writeHead(200, { 'content-type': 'application/json' });
-      return res.end(JSON.stringify({ data: [{ id: 'qwen3.8-27b-variant' }, { id: 'qwen3.8-27b' }] }));
+      return res.end(JSON.stringify({ data: [{ id: 'text-embedding-demo' }, { id: 'qwen3.8-27b-community-finetune' }, { id: 'qwen3.8-27b' }] }));
     }
     if (req.url === '/v1/completions') {
       let b = '';
@@ -382,7 +382,7 @@ await test('e2e LLM path: streams tokens from LM Studio /v1/completions', async 
       const { done } = await checkRecord(rec, dir, events);
       assert.equal(done.cached, false);
       assert.equal(rec.text, reply);
-      assert.equal(rec.model, 'qwen3.8-27b', 'picks the Qwen3.8 model');
+      assert.equal(rec.model, 'qwen3.8-27b', 'picks the plain Qwen3.8-27B build');
       const req = lm.requests.find((x) => x.max_tokens !== 1);
       assert.ok(req.prompt.endsWith('<think>\n\n</think>\n\n'), 'empty think block prefill');
       assert.ok(req.max_tokens <= 80);

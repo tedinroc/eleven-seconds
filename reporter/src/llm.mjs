@@ -74,12 +74,10 @@ export class LmStudio {
       const res = await fetch(`${this.cfg.baseUrl}/v1/models`, { signal: ctrl.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const ids = ((await res.json())?.data ?? []).map((m) => String(m.id));
-      const clean = (id) => !/-variant\b/i.test(id);
-      const found =
-        ids.find((id) => /qwen3[._-]?8.*27b/i.test(id) && clean(id)) ??
-        ids.find((id) => /qwen3[._-]?8/i.test(id) && clean(id)) ??
-        null;
-      if (!found) throw new Error(`no clean Qwen3.8 model among: ${ids.slice(0, 6).join(', ') || '(none)'}`);
+      // Qwen3.8-27B first, then any Qwen3.8; among several builds the shortest id (the plain one).
+      const pick = (re) => ids.filter((id) => re.test(id)).sort((a, b) => a.length - b.length)[0];
+      const found = pick(/qwen3[._-]?8.*27b/i) ?? pick(/qwen3[._-]?8/i) ?? null;
+      if (!found) throw new Error('no Qwen3.8 model found; set LLM_MODEL');
       this.model = found;
       this.log(`[reporter] LM Studio model: ${found}`);
       return found;

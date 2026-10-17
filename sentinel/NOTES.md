@@ -61,7 +61,8 @@ node sentinel/test/sim-latency.mjs                      # read-only eth_simulate
 | `SIM_WAIT_PING_MS` | 600 | a simulation that finds the keep-warm ping on the warm socket waits for it instead of opening a new one |
 | `FINALITY` | `depth:2` / `tag` | `tag` = `eth_getBlockByNumber("finalized")` |
 | `FEE_REFRESH_MS` | 10000 | |
-| `GAS_HEADROOM` | 1.25 | multiplier on gas.json limits (see "Findings") |
+| `VETO_MIN_PRIORITY_GWEI` | 10 | floor for the veto priority fee (gwei) so a veto is not queued behind cheaper traffic; adds about 0.001 MON per veto |
+| `GAS_HEADROOM` | 1.25 | multiplier on gas.json limits (see "Gas headroom") |
 | `STRICT`, `DRY_RUN`, `ATTACH` | 0, 0, 1 on sentinel-1 only | |
 | `ATTACH_SECRET` | — | shared secret for `POST /attach` (header `X-Attach-Secret`); unset = loopback peers only |
 | `RESCAN_BLOCKS` | 10 | every poll round re-scans the last N blocks (dedupe by id absorbs repeats) |
@@ -80,7 +81,7 @@ request must carry `X-Attach-Secret: <secret>` (401 otherwise); without a secret
 proposal (status != None), else 400 `unknown proposal`. `/events` and `/health` keep `ACAO: *` for
 the frontend.
 
-## RPC transport (why simMs dropped)
+## RPC transport
 
 - One client per URL for the whole process (`clientFor` in `src/rpc.mjs`): `node:https` with an
   explicit `Agent({ keepAlive: true, scheduling: 'lifo' })`, no fetch/undici. Polling, reads,
@@ -96,9 +97,8 @@ the frontend.
   equals the proposal's codehash wins, so a lagging node's `0x` cannot cause an R6). Holder balance
   and the current implementation's selectors come from the 5 s background refresh; the selectors
   are only needed after the simulation (selectorsAdded is informational, never the verdict).
-  Before: getCode + getStorageAt + balance + old impl code on the polled primary, whose one warm
-  socket was usually busy polling, so the parallel reads opened new TLS connections (the ~0.8-1.8 s
-  gap between simMs and simRequestMs seen on testnet).
+  Keeping these reads off the critical path avoids opening extra TLS connections next to the busy
+  polling socket.
 - Failover: every read goes through a sticky chain (`createFailover`); a transport error (tls
   handshake eof, ECONNRESET, socket hang up, timeout, `HTTP request failed`, HTTP 429/5xx, rate-limit
   messages) retries the same call on the next provider at once, which stays active (the primary is
@@ -157,7 +157,7 @@ Looked up with `isApprovedCodehash(bytes32)`; sentinel-side convention, contract
 
 | Proposal | Key |
 |---|---|
-| R7: SetGuardian / SetDelay / SetPausedImpl (kinds 1, 2, 3) | `keccak256(abi.encode(uint8 kind, address target, uint256 value))`. SetGuardian: value 1 = add, 0 = remove; SetDelay: target `address(0)`, value = new delay; SetPausedImpl: value 0 (keyed by action, separate from upgrade codehashes) |
+| R7: SetGuardian / SetDelay / SetPausedImpl (kinds 1, 2, 3) | `keccak256(abi.encode(uint8 kind, address target, uint256 value))`. SetGuardian: value 1 = add, 0 = remove; SetDelay: target `address(0)`, value = new delay; SetPausedImpl: value 0 (an upgrade codehash approval does not cover it) |
 | R8: upgrade with non-empty `data` | `keccak256(abi.encode(bytes32 codehash, bytes32 keccak256(data)))` |
 | R5 (STRICT) and the R9 exemption | the implementation's `codehash` itself |
 
@@ -201,7 +201,9 @@ cast keccak $(cast abi-encode "f(bytes32,bytes32)" 0xCodehash $(cast keccak 0xDA
 | R6 timeouts | kept at 2500 ms per request / 5000 ms budget: about 6x the kept-alive latency, and a retry still fits |
 | anvil `--network monad -b 0.3`, 3 sentinels, 5 rounds × 4 cards (evilMint, evilOwner, evilFee, v2) | 0 wrong verdicts; every veto landed 1 block after the proposal (29 blocks left); proposal_seen → veto_receipt 299–309 ms; vetoed execute → `ProposalVetoed`; v2 executes after 30 blocks, `version()` = "2" |
 | kill sentinel-2 after round 3 (SIGKILL) | its heartbeats stop immediately; rounds 4–5 vetoed by the other two (vetoCount 2), 0 failures |
-| testnet before this change (2026-10-17, venue network, EvilMint #1) | simMs 2236/2573/2308 of which simRequestMs 1399/804/689: the rest was reads opening new TLS connections on the polled primary |
+| testnet, first round with cold connections (2026-10-17, venue network, EvilMint #1) | simMs 2236/2573/2308 of which simRequestMs 1399/804/689; the rest was new TLS connections |
+| dedupe | every proposal arrived on both WS and polling (20 duplicates dropped per sentinel in 20 proposals); one proposal_seen and at most one veto per sentinel |
+| R7 / R8 on anvil | remove guardian → R7, add guardian → R7, delay 30→10 → R7, 30→40 → pass, upgrade with init data → R8 |
 
 ### Cold vs kept-alive on Monad testnet (`node test/sim-latency.mjs`, read-only, 2026-10-17 ~12:00 UTC+8, operator's network)
 
@@ -218,38 +220,33 @@ Real merged request for the deployed EvilMint impl (73 calls, 14.8 kB, same buil
 - Idle socket reuse: after 5 / 12 / 20 / 30 s idle both simulation providers still reused the same
   socket (eth_chainId 282–637 ms). After 25 s idle with `keepWarm` at 12 s: one ping, then the
   simulation reused the socket (590–736 ms). 13 requests per provider used 1 connection, 0 errors.
-- Critical path the sentinel now runs (getCode race + simulateV1, warm sockets, 6 runs per provider):
-  official 1076–1257 ms (v2 1992), thirdweb 914–1177 ms; one outlier 4146 ms where monadinfra
-  stalled and ankr answered after 3350 ms (the reason for `READ_HEDGE_MS`: the third read provider
-  joins after 800 ms). Expected testnet simMs is about 1.0–1.2 s instead of 2.2–2.6 s; this was not
-  re-measured with a live testnet proposal (no transactions from this line).
+- Critical path the sentinel runs (getCode race + simulateV1, warm sockets): typically official
+  1076–1257 ms, thirdweb 914–1177 ms. `READ_HEDGE_MS` lets the third read provider join after
+  800 ms when the first two have not answered. Live testnet results are in the main README.
 - anvil (`-b 0.3`, 8547): normal config 3 + 4 rounds (the second with sentinel-2 SIGKILLed after
   round 2) 0 wrong verdicts, veto +1 block. Dead primaries for read, simulation, broadcast and WS
   (`READ_RPCS`/`SIM_RPCS`/`BROADCAST_RPCS` = dead port first, `WS_URL` dead with a fallback):
   5 rounds 0 failures, veto +1 block, WS on the fallback after the 5 s connect timeout. Dead getCode
   racer (`READ_RACE=1`): the hedge starts as soon as the racer fails (codeMs about 10 ms), 0 failures.
-| dedupe | every proposal arrived on both WS and polling (20 duplicates dropped per sentinel in 20 proposals); one proposal_seen and at most one veto per sentinel |
-| R7 / R8 on anvil | remove guardian → R7, add guardian → R7, delay 30→10 → R7, 30→40 → pass, upgrade with init data → R8 |
 
-Testnet numbers (proposal_seen → veto_receipt, veto block, gas cost) are not measured yet: they
-need the 10143 deployment and a testnet broadcast started by the operator.
+Testnet numbers (proposal_seen → veto_receipt, veto block, gas cost) are in the main README, section
+"Measured today on Monad testnet".
 
-## Findings
+## Gas headroom
 
-- **gas.json veto limit is too tight.** On anvil `--network monad` a first veto used 89,535 gas early
-  in the run and 100,335 later (four cold SLOADs at 8,100 each), above gas.json's 98,489
-  (89,535 × 1.10): so the sentinel
-  multiplies gas.json limits by `GAS_HEADROOM` (default 1.25 → 123,112). Monad charges the gas
-  limit, so a veto costs up to 25% more than with the tight limit.
+- On anvil `--network monad` a first veto uses 89,535–100,335 gas depending on cold SLOADs (four at
+  8,100 each). The sentinel multiplies gas.json limits by `GAS_HEADROOM` (default 1.25 → 123,112)
+  so every case fits without gas estimation. Monad charges the gas limit, so the headroom is part of
+  the per-veto cost.
 
 ## Extended attack suite (2026-10-17)
 
-Regression: `test/e2e-bypass.mjs` deploys an extended set of attack implementations
-(`test/fixtures/Bypass.sol`, `test/fixtures/Evil.sol`, compiled out of tree, `BYPASS_OUT=<out dir>`)
-and proposes each against three live sentinels; `BYPASS_OUT=... node --test test/unit.test.mjs`
-also checks their selectors / opcodes offline.
+`test/e2e-attacks.mjs` deploys an extended set of attack implementations (`test/fixtures/Attacks.sol`,
+`test/fixtures/Evil.sol`, compiled out of tree, `ATTACKS_OUT=<out dir>`) and proposes each against
+three live sentinels; `ATTACKS_OUT=... node --test test/unit.test.mjs` also checks their selectors /
+opcodes offline.
 
-| Bypass | Now |
+| Attack implementation | Vetoed by |
 |---|---|
 | EvilTransferFromImpl (transferFrom without allowance) | R3B |
 | EvilSweep (stranger moves holders[0]'s balance) | R3B |
@@ -258,23 +255,19 @@ also checks their selectors / opcodes offline.
 | EvilZeroSelMint / EvilZeroSelOwner (PUSH3 selectors) | R1 / R2 |
 | V2Init / V2Init3 without init data (anyone can call the reinitializer) | R2 |
 | add guardian / SetPausedImpl / v2 + init data | R7 / R7 (key actionHash) / R8 (key codehash+data) |
-| broadcast and /attach checks | "replacement underpriced" not delivered; text/plain /attach → 415, no ACAO; 41-selector impl → truncated → R6 |
+| /attach and broadcast checks | "replacement underpriced" counts as not delivered; text/plain /attach → 415, no ACAO; 41-selector impl → truncated → R6 |
 
-anvil `-b 0.3` (8587, SSE 8741-8743, token owner = GuardedAdmin from Deploy.s.sol): 15 bypass
+anvil `-b 0.3` (8587, SSE 8741-8743, token owner = GuardedAdmin from Deploy.s.sol): all 15
 proposals vetoed x3 with the expected rule, 29 blocks left each; four cards 0 wrong verdicts.
 Backfill: sentinels stopped, EvilMint proposed, restarted with `LOOKBACK_BLOCKS=1 RESCAN_BLOCKS=1`:
 the startup scan judged it and it ended Vetoed x3 before readyBlock.
 
-Note: `script/export-shared.sh` regenerates `shared/rules.json` from its own list; it must include
-`R3B_THIRD_PARTY_FUNDS` and `R9_NEW_OPCODES` or the new entries (and their zh labels) are dropped
-(the sentinel itself recomputes every hash and still works).
+`script/export-shared.sh` regenerates `shared/rules.json` (R1–R9 including R3B, with zh labels); the
+sentinel recomputes every hash on start.
 
 ## Next steps
 
-- Fork-simulation fallback (anvil fork when both testnet simulation RPCs are down): not implemented;
-  today that case is an R6 fail-closed veto.
-- Four-stage commit state (monadNewHeads `commitState`): finality uses the `finalized` block tag
-  (testnet) or 2-block depth (anvil); heads are used only for `lastBlock`.
-- Not run against testnet (no 10143 deployment yet; no testnet broadcasts from this line).
-
-| VETO_MIN_PRIORITY_GWEI | 10 | Floor for the veto priority fee (gwei). Costs about 0.001 MON extra per veto. |
+- Fork-simulation fallback: an anvil fork as a third simulation provider next to official and
+  thirdweb.
+- Four-stage commit state from monadNewHeads `commitState` for the finality display (finality uses
+  the `finalized` tag on testnet and 2-block depth on anvil).

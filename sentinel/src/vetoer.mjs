@@ -228,9 +228,9 @@ export class Vetoer {
 }
 
 // gas.json shape is owned by the contracts line; accept a plain number or an object with a limit.
-// GAS_HEADROOM multiplies the gas.json limits. Observed on anvil --network monad: a first veto used
-// 89,535 gas early in a run and 100,335 later (four cold SLOADs at 8,100 each), above gas.json's
-// 98,489 (= 89,535 x 1.10), so a 1.10 margin was too tight. Default 1.25 keeps a margin without estimating.
+// GAS_HEADROOM multiplies the gas.json limits. On anvil --network monad a first veto uses 89,535–100,335
+// gas depending on cold SLOADs (four at 8,100 each); the default 1.25 (123,112) covers the largest case
+// without estimating.
 export function readGasLimits(gasJson, log, headroom = Number(process.env.GAS_HEADROOM ?? 1.25)) {
   const defaults = { veto: 200_000n, attachReason: 120_000n }
   const out = {}

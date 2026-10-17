@@ -37,7 +37,7 @@ export const CONFIG = {
       chainId: 10143,
       badge: 'Monad 测试网 10143',
       ws: ['wss://testnet-rpc.monad.xyz', 'wss://rpc-testnet.monadinfra.com'],
-      // ankr 放第一：2026-10-17 会场网路实测 monadinfra 读取常回 HTTP request failed（两家都在 spec 4.2.3 的 getLogs/心跳名单内）
+      // ankr 放第一：读取顺序依 2026-10-17 会场网路实测排序（两家都在 spec 4.2.3 的 getLogs/心跳名单内）
       http: ['https://rpc.ankr.com/monad_testnet', 'https://rpc-testnet.monadinfra.com'],
       headsMethod: 'monadNewHeads',
       explorerTx: 'https://testnet.monadexplorer.com/tx/',

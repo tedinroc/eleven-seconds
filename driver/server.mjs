@@ -50,7 +50,7 @@ const list = (s) => (s ?? '').split(',').map((x) => x.trim()).filter(Boolean)
 const OFFICIAL = 'https://testnet-rpc.monad.xyz'
 const ANKR = 'https://rpc.ankr.com/monad_testnet'
 const MONADINFRA = 'https://rpc-testnet.monadinfra.com'
-// 会场实测：monadinfra 读取一直 HTTP request failed，所以读取放最后；官方每 IP 每秒 15 次，只当第二顺位
+// 读取顺序依 2026-10-17 会场网路实测排序；官方每 IP 每秒 15 次，只当第二顺位
 const RPC_URLS = list(process.env.RPC_URLS).length
   ? list(process.env.RPC_URLS)
   : IS_ANVIL_NAME

@@ -117,7 +117,6 @@ p, li { font-size: 38px; line-height: 1.5; }
 .demo ol { list-style: none; margin-top: 50px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 20px; width: 100%; }
 .demo li { background: var(--panel); border: 2px solid var(--line); border-radius: 18px; padding: 24px 18px; font-size: 30px; line-height: 1.4; }
 .demo li b { display: block; font-family: var(--mono); color: var(--accent); font-size: 34px; margin-bottom: 6px; }
-.demo .backup { position: absolute; right: 70px; bottom: 50px; font-size: 26px; color: var(--muted); border: 2px dashed var(--line); border-radius: 14px; padding: 14px 22px; }
 .pulse { display: inline-block; width: 22px; height: 22px; border-radius: 50%; background: var(--danger); margin-right: 16px; vertical-align: middle; animation: pulse 1.2s infinite; }
 @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,92,122,.6); } 50% { box-shadow: 0 0 0 18px rgba(255,92,122,0); } }
 
@@ -151,7 +150,7 @@ p, li { font-size: 38px; line-height: 1.5; }
 .stat { background: var(--panel); border: 2px solid var(--line); border-radius: 20px; padding: 22px 24px; }
 .stat .v { font-family: var(--mono); font-size: 64px; font-weight: 800; line-height: 1.05; font-variant-numeric: tabular-nums; }
 .stat .k { font-size: 26px; color: var(--muted); margin-top: 8px; line-height: 1.35; }
-.note { margin-top: 24px; font-size: 27px; color: var(--muted); }
+.note { margin-top: 14px; font-size: 27px; color: var(--muted); }
 
 /* ---------- 8 范围与下一步 ---------- */
 .two { display: grid; grid-template-columns: 1fr 1.15fr; gap: 40px; }
@@ -290,7 +289,7 @@ p, li { font-size: 38px; line-height: 1.5; }
   <!-- 7 为什么是 Monad -->
   <section class="slide" data-title="为什么是 Monad">
     <div class="kicker">为什么是 Monad</div>
-    <h2 style="margin-bottom:24px">同样 30 个区块</h2>
+    <h2 style="margin-bottom:12px">同样 30 个区块</h2>
     <table class="mtable rise">
       <thead><tr><th>链</th><th>出块时间</th><th style="text-align:right">30 个区块</th></tr></thead>
       <tbody>
@@ -299,17 +298,17 @@ p, li { font-size: 38px; line-height: 1.5; }
         <tr class="monad"><td><b>Monad 测试网</b></td><td>今日实测约 0.30 秒/块 · 亚秒级最终性</td><td class="r purple">约 9 秒</td></tr>
       </tbody>
     </table>
-    <div class="stats" style="grid-template-columns: repeat(3, 1fr)">
+    <div class="stats" style="grid-template-columns: repeat(3, 1fr); margin-top: 24px">
       <div class="stat rise"><div class="v red">4–7 块</div><div class="k">提案后 4–7 块落地否决<br>攻击者还要等 23–26 块</div></div>
       <div class="stat rise"><div class="v"><span class="count" data-to="1.25" data-dec="2">1.25</span> 秒</div><div class="k">最快：哨兵看到提案<br>→ 否决回执（提案 #8）</div></div>
       <div class="stat rise"><div class="v yellow">约 <span class="count" data-to="0.0135" data-dec="4">0.0135</span></div><div class="k">MON · 单次否决成本<br>123,112 gas × 110 gwei</div></div>
     </div>
-    <p class="note">今日测试网：恶意提案 #3、#4、#5、#6、#8、#9 全部 3/3 否决，execute 回 <span class="mono">ProposalVetoed</span>；v2 提案 #2、#7 放行，30 块后生效。BSC 也能做到秒级；Monad 的优势是粒度更细、确定性最终性（否决落地后不会被重组）、成本低。</p>
+    <p class="note">今日测试网：恶意提案 #3–#6、#8、#9 全部 3/3 否决，execute 回 <span class="mono">ProposalVetoed</span>；v2 提案 #2、#7 放行，30 块后生效。BSC 也能做到秒级冷静期；Monad 的优势是粒度更细、确定性最终性（否决不会被重组）、成本低。</p>
   </section>
 
   <!-- 8 范围与下一步 -->
-  <section class="slide" data-title="已知范围与下一步">
-    <div class="kicker">已知范围与下一步</div>
+  <section class="slide" data-title="范围与下一步">
+    <div class="kicker">范围与下一步</div>
     <h2 style="margin-bottom:34px">保护升级路径，接入只要一步</h2>
     <div class="two">
       <div class="rise">
@@ -326,7 +325,7 @@ p, li { font-size: 38px; line-height: 1.5; }
         <ul>
           <li><b>严格模式默认开启</b>：新 codehash 需第二把钥匙预先核准（已实现，开关 STRICT=1）</li>
           <li><b>押金哨兵网络</b>：任何人押保证金都能跑哨兵</li>
-          <li><b>多签 override</b>：误判时由多签放行，本身也走冷静期</li>
+          <li><b>多签 override</b>：多签可推翻否决，本身也走冷静期</li>
           <li>minter 等其他特权也放到冷静期后面</li>
         </ul>
       </div>

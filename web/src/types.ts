@@ -90,7 +90,7 @@ export interface CardInfo {
 }
 
 export const CARDS: CardInfo[] = [
-  { id: 'evilMint', name: 'EvilMint', desc: '任何人都能 mint（Solv 模式，selector 与 v1 相同）', expect: 'veto', expectRule: 'R1_TOTAL_SUPPLY' },
+  { id: 'evilMint', name: 'EvilMint', desc: '任何人都能 mint（无限增发，selector 与 v1 相同）', expect: 'veto', expectRule: 'R1_TOTAL_SUPPLY' },
   { id: 'evilOwner', name: 'EvilOwner', desc: '新增 claimOwner()，任何人可夺 owner', expect: 'veto', expectRule: 'R2_OWNER' },
   { id: 'evilFee', name: 'EvilFee', desc: 'selector 完全不变，transfer 偷抽 10% 给 owner', expect: 'veto', expectRule: 'R3_TRANSFER_CONSERVATION' },
   { id: 'v2', name: 'DemoBTC v2', desc: '正常升级，只多一个 version()', expect: 'pass', expectRule: null },

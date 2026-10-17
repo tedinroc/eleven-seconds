@@ -1,4 +1,4 @@
-// Security-review bypass fixtures, second set (see Bypass.sol for how to build).
+// Extended attack fixtures, second set (see Attacks.sol for how to build).
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.37;
 import {DemoBTC} from "repo/DemoBTC.sol";
@@ -12,7 +12,7 @@ contract EvilZeroSelMint is DemoBTC {
 contract EvilZeroSelOwner is DemoBTC {
     function claim69() external { _transferOwnership(msg.sender); }
 }
-// B2: unguarded mint with 3 static args: every probe shape is too short and reverts in the ABI decoder
+// B2: unguarded mint with 3 static args (caught by the wide 8-word probe)
 contract Evil3ArgMint is DemoBTC {
     function mintTo(address to, uint256 amount, uint256 memo) external { memo; _mint(to, amount); }
 }

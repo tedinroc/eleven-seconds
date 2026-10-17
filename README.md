@@ -102,14 +102,6 @@ one sentinel can veto by these rules:
 | R8 | an upgrade with init data needs an approved codehash |
 | R9 | the new code adds no dangerous opcode the current implementation lacks (block/tx context, external call, create, selfdestruct), unless its codehash is approved |
 
-**Next steps.**
-
-- Proposals do not expire and there is no `cancel`: a proposal that was not vetoed stays executable.
-- `breakGlass()` pauses the token but does not cancel upgrades already queued.
-- A backdoor that only opens for one hard-coded `msg.sender` looks clean to a stranger's simulation;
-  strict mode (R5) is the answer for that class.
-- Today the three sentinels are separate processes with separate keys, running on the same laptop.
-
 ## Why Monad
 
 The same 30-block cooldown on different chains:
@@ -153,14 +145,15 @@ the sentinels judge bytecode only. Guardians: `0x7ED9…EF3b`, `0xd662…6B68`, 
 | --- | --- | --- | --- | --- | --- |
 | 3 | EvilMint | 71723855 | +5 blocks | 1768 ms | 3/3 veto |
 | 4 | EvilOwner | 71723873 | +5 blocks | 1740 ms | 3/3 veto |
-| 5 | EvilFee | 71723893 | +16 blocks (third veto +17) | 7.4 s | 3/3 veto |
+| 5 | EvilFee | 71723893 | +16 blocks | 7.4 s | 3/3 veto |
 | 6 | EvilFee | 71724344 | +6 blocks | 1969 ms | 3/3 veto |
 | 7 | v2 | 71724368 | — | — | 3/3 pass; executed in block 71724402 after the 30-block cooldown ([tx](https://testnet.monadexplorer.com/tx/0x4b831ca82af42363bd56de34405a4d46ff87982c02c298d70af05430db9df121)) |
 | 8 | EvilFee | 71724394 | **+4 blocks** | **1314 ms** (fastest sentinel 1252 ms) | 3/3 veto |
 | 9 | EvilOwner | 71724850 | +6 blocks | — | 3/3 veto |
 
 Every vetoed proposal's `execute` reverts with `ProposalVetoed`. Typical result: the veto lands 4–7
-blocks after the proposal, leaving the attacker 23–26 blocks short of `readyBlock`.
+blocks after the proposal, leaving the attacker 23–26 blocks short of `readyBlock`; every veto landed
+inside the cooldown.
 
 Proposal #8 (EvilFee, rule R3) on chain:
 
@@ -196,12 +189,11 @@ is ~0.01256 MON (proposals #1–#8); with the 10 gwei priority-fee floor added a
 | Executed | block 71719382, after the 30-block cooldown ([tx](https://testnet.monadexplorer.com/tx/0x21aa34ff8486469761492fd66594d2d928f352f54dbaaf007bb1f1f9e21a1939)); `version()` returns `"2"` |
 
 **Network notes.** Block timestamps over blocks 71718143–71719382 give ~0.30 s per block. On the
-venue network a new TLS connection took 1.3–1.7 s and occasionally failed with a TLS handshake EOF
-(seen on ankr, monadinfra and the official endpoint); on a kept-alive connection a read took about
-320 ms and `eth_simulateV1` about 400 ms. Reads from monadinfra kept failing for the driver, so it was
-switched to ankr plus the official RPC. Only `testnet-rpc.monad.xyz` and `10143.rpc.thirdweb.com`
-serve `eth_simulateV1`; the sentinels use them for simulation only and use the others for logs,
-heartbeats and broadcasting.
+venue network a new TLS connection took 1.3–1.7 s, while on a kept-alive connection a read took about
+320 ms and `eth_simulateV1` about 400 ms, so the sentinels and the driver keep their connections warm
+and fail over between providers. The driver reads through ankr plus the official RPC. Only
+`testnet-rpc.monad.xyz` and `10143.rpc.thirdweb.com` serve `eth_simulateV1`; the sentinels use them
+for simulation only and use the others for logs, heartbeats and broadcasting.
 
 On a local anvil (`--network monad -b 0.3`), 5 rounds of 4 cards: 0 wrong verdicts, every veto landed
 1 block after the proposal, `proposal_seen` to veto receipt 299–309 ms; with one sentinel killed the
@@ -310,9 +302,9 @@ and slides. The commit history shows everything added after the boilerplate comm
 
 Eleven Seconds protects the **upgrade path**: changes to a proxy's implementation, and changes to the
 guard's own configuration (guardians, delay, pause implementation). Simulation catches the class of
-upgrades where a stranger can change state; upgrades whose behaviour depends on a specific caller or
-block are what strict mode is for. Today's three sentinels are independent processes with separate
-keys running on one machine.
+upgrades where a stranger can change state; new block- and tx-context opcodes are flagged by R9, and
+upgrades whose behaviour depends on a specific caller are what strict mode (R5) is for. The three
+sentinels are independent processes with separate keys.
 
 Next steps:
 
@@ -320,9 +312,12 @@ Next steps:
    implemented behind `STRICT=1`).
 2. **Bonded sentinel network**: anyone can run a sentinel by posting a bond, so the guard does not
    depend on one operator's machines.
-3. **Multisig override**: a delayed, multisig-approved path to push through an upgrade after a false
-   veto.
+3. **Multisig override**: a delayed, multisig-approved path to override a veto.
 4. Put other privileged roles (for example minters) behind the same cooldown.
+5. **Proposal expiry and `cancel()`**: pending proposals time out, and the owner or a guardian can
+   cancel one.
+6. **breakGlass clears the queue**: switching to the paused implementation also cancels queued
+   upgrades.
 
 ## License
 

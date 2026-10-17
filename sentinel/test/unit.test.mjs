@@ -48,16 +48,16 @@ test('R9 opcode scan: demo impls have none of the dangerous opcodes; PUSH data a
   assert.deepEqual(dangerousOpcodes('0x' + '5af1fa3242'), ['CALL', 'GAS', 'ORIGIN', 'STATICCALL', 'TIMESTAMP'])
 })
 
-// Review fixtures (test/fixtures/*.sol), when their compiled out dir is given: BYPASS_OUT=<forge out>
-const BYP = process.env.BYPASS_OUT
-test('review fixtures: zero-byte selectors found, time/flag/origin bombs flagged by R9', { skip: !(BYP && existsSync(resolve(BYP, 'Bypass.sol'))) && 'set BYPASS_OUT' }, () => {
+// Extended attack fixtures (test/fixtures/*.sol), when their compiled out dir is given: ATTACKS_OUT=<forge out>
+const BYP = process.env.ATTACKS_OUT
+test('extended fixtures: zero-byte selectors found, time/flag/origin bombs flagged by R9', { skip: !(BYP && existsSync(resolve(BYP, 'Attacks.sol'))) && 'set ATTACKS_OUT' }, () => {
   const fx = (f, n) => JSON.parse(readFileSync(resolve(BYP, f, `${n}.json`), 'utf8'))
-  for (const n of ['EvilTransferFromImpl', 'ThreeArgMintImpl', 'V2Init', 'V2Init3', 'TimeBombMintImpl', 'FlagMintImpl', 'OriginMintImpl']) assertSelectors(fx('Bypass.sol', n), n)
+  for (const n of ['EvilTransferFromImpl', 'ThreeArgMintImpl', 'V2Init', 'V2Init3', 'TimeBombMintImpl', 'FlagMintImpl', 'OriginMintImpl']) assertSelectors(fx('Attacks.sol', n), n)
   if (existsSync(resolve(BYP, 'Evil.sol'))) for (const n of ['EvilZeroSelMint', 'EvilZeroSelOwner', 'Evil3ArgMint', 'EvilSweep']) assertSelectors(fx('Evil.sol', n), n)
-  assert.deepEqual(dangerousOpcodes(fx('Bypass.sol', 'TimeBombMintImpl').deployedBytecode.object), ['NUMBER'])
-  assert.deepEqual(dangerousOpcodes(fx('Bypass.sol', 'OriginMintImpl').deployedBytecode.object), ['ORIGIN'])
-  assert.ok(dangerousOpcodes(fx('Bypass.sol', 'FlagMintImpl').deployedBytecode.object).includes('STATICCALL'))
-  for (const n of ['EvilTransferFromImpl', 'ThreeArgMintImpl', 'V2Init']) assert.deepEqual(dangerousOpcodes(fx('Bypass.sol', n).deployedBytecode.object), [], n)
+  assert.deepEqual(dangerousOpcodes(fx('Attacks.sol', 'TimeBombMintImpl').deployedBytecode.object), ['NUMBER'])
+  assert.deepEqual(dangerousOpcodes(fx('Attacks.sol', 'OriginMintImpl').deployedBytecode.object), ['ORIGIN'])
+  assert.ok(dangerousOpcodes(fx('Attacks.sol', 'FlagMintImpl').deployedBytecode.object).includes('STATICCALL'))
+  for (const n of ['EvilTransferFromImpl', 'ThreeArgMintImpl', 'V2Init']) assert.deepEqual(dangerousOpcodes(fx('Attacks.sol', n).deployedBytecode.object), [], n)
 })
 
 test('rule hashes agree with shared/rules.json (every rule present, with a zh label)', () => {

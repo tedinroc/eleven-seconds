@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// Regression e2e for the security-review bypasses (anvil only, anvil's public test accounts).
-// Needs three running sentinels and the compiled fixture contracts of test/fixtures/Bypass.sol
+// Extended attack suite e2e (anvil only, anvil's public test accounts).
+// Needs three running sentinels and the compiled fixture contracts of test/fixtures/Attacks.sol
 // (build them in any foundry project that maps `repo/` to this repo's src/, see the header there):
 //
 //   RPC_URL=http://127.0.0.1:8587 DEPLOYMENTS=<deploy.json> SSE_PORTS=8741,8742,8743 \
-//     BYPASS_OUT=<forge out dir> node test/e2e-bypass.mjs
+//     ATTACKS_OUT=<forge out dir> node test/e2e-attacks.mjs
 //
-// Every bypass implementation (and the config / init-data proposals) must be vetoed by every live
+// Every attack implementation (and the config / init-data proposals) must be vetoed by every live
 // sentinel with the expected rule, before readyBlock. Also checks the /attach gate on the first port.
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve, join } from 'node:path'
@@ -20,8 +20,8 @@ import { sleep } from '../src/util.mjs'
 const RPC_URL = process.env.RPC_URL ?? 'http://127.0.0.1:8545'
 const dep = JSON.parse(readFileSync(resolve(REPO_ROOT, process.env.DEPLOYMENTS ?? 'shared/deployments/anvil.json'), 'utf8'))
 const PORTS = (process.env.SSE_PORTS ?? '8701,8702,8703').split(',').map(Number)
-const OUT = process.env.BYPASS_OUT
-if (!OUT || !existsSync(join(OUT, 'Bypass.sol'))) throw new Error('set BYPASS_OUT to a forge out dir containing Bypass.sol/*.json')
+const OUT = process.env.ATTACKS_OUT
+if (!OUT || !existsSync(join(OUT, 'Attacks.sol'))) throw new Error('set ATTACKS_OUT to a forge out dir containing Attacks.sol/*.json')
 const gaAbi = JSON.parse(readFileSync(resolve(REPO_ROOT, 'shared/abi/GuardedAdmin.json'), 'utf8'))
 const gas = JSON.parse(readFileSync(resolve(REPO_ROOT, 'shared/gas.json'), 'utf8'))
 
@@ -83,15 +83,15 @@ async function propose(functionName, args) {
 }
 
 const latest = Number(await pub.getBlockNumber())
-const flag = await deploy('Bypass.sol', 'Flag')
+const flag = await deploy('Attacks.sol', 'Flag')
 const cases = [
-  ['EvilTransferFromImpl', 'Bypass.sol', [], 'R3B_THIRD_PARTY_FUNDS'],
-  ['TimeBombMintImpl', 'Bypass.sol', [BigInt(latest + 100_000)], 'R9_NEW_OPCODES'],
-  ['FlagMintImpl', 'Bypass.sol', [flag], 'R9_NEW_OPCODES'],
-  ['OriginMintImpl', 'Bypass.sol', [toHex(crypto.getRandomValues(new Uint8Array(20)))], 'R9_NEW_OPCODES'],
-  ['ThreeArgMintImpl', 'Bypass.sol', [], 'R1_TOTAL_SUPPLY'],
-  ['V2Init', 'Bypass.sol', [], 'R2_OWNER'],
-  ['V2Init3', 'Bypass.sol', [], 'R2_OWNER'],
+  ['EvilTransferFromImpl', 'Attacks.sol', [], 'R3B_THIRD_PARTY_FUNDS'],
+  ['TimeBombMintImpl', 'Attacks.sol', [BigInt(latest + 100_000)], 'R9_NEW_OPCODES'],
+  ['FlagMintImpl', 'Attacks.sol', [flag], 'R9_NEW_OPCODES'],
+  ['OriginMintImpl', 'Attacks.sol', [toHex(crypto.getRandomValues(new Uint8Array(20)))], 'R9_NEW_OPCODES'],
+  ['ThreeArgMintImpl', 'Attacks.sol', [], 'R1_TOTAL_SUPPLY'],
+  ['V2Init', 'Attacks.sol', [], 'R2_OWNER'],
+  ['V2Init3', 'Attacks.sol', [], 'R2_OWNER'],
 ]
 if (existsSync(join(OUT, 'Evil.sol'))) {
   cases.push(
@@ -154,5 +154,5 @@ for (const [what, ok] of checks) {
   if (!ok) failures++
   console.log(`${ok ? 'ok  ' : 'FAIL'} /attach: ${what}`)
 }
-console.log(`\n${props.length} bypass proposals + ${checks.length} attach checks: ${failures} failures`)
+console.log(`\n${props.length} attack proposals + ${checks.length} attach checks: ${failures} failures`)
 process.exit(failures ? 1 : 0)

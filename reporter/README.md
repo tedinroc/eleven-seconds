@@ -19,7 +19,7 @@ npm run probe-llm      # 對真的 LM Studio 打一次，看首字延遲、tok/s
 ## 模型與降級
 
 - LM Studio OpenAI 相容端點，預設 `/v1/completions`，提示詞用 Qwen 聊天模板手組，assistant 開頭預填空的 `<think>\n\n</think>\n\n` 關閉思考（LM Studio 會靜默丟掉 enable_thinking 這類參數）。`LLM_API=chat` 改用 chat 端點、結尾放預填的 assistant 訊息。
-- 模型自動挑 `/v1/models` 裡的 Qwen3.8-27B，也可用 `LLM_MODEL` 指定。取樣用非思考建議值，`max_tokens` 80。
+- 模型自動挑 `/v1/models` 裡的 Qwen3.8-27B（有多個版本時取 id 最短的那個），也可用 `LLM_MODEL` 指定。取樣用非思考建議值，`max_tokens` 80。
 - 啟動時會發一次 1 token 的暖機請求（暖連線、觸發 JIT 載入）；`LLM_WARMUP=0` 關閉。
 - **模板報告（`cached: true`）**：LM Studio 沒開、`LLM_FIRST_TOKEN_MS` 內沒出第一個字、總預算 `LLM_TIMEOUT_MS`（20 秒）用完、或依實測速度推算必然超時（提早中止，不必乾等 20 秒），一律改用依規則 ID（R1–R8 與 pass）填空的模板。
 - 模型輸出還要過檢查，不過就改用模板：出現「绝对安全」之類的絕對化措辭、推測攻擊者身分、或出現提示詞裡沒有的數字（防幻覺數字）。

@@ -16,7 +16,7 @@
 | 核心機制 | 1) 提案 → 30 塊冷靜期 → 執行；2) 任一 guardian 可在執行前否決；3) 3 個獨立哨兵用 eth_simulateV1＋stateOverride 對新 impl 做攻擊模擬與不變量檢查；4) breakGlass 立即切到預註冊的暫停實作 |
 | AI 的位置 | 不在否決關鍵路徑上。本機 Qwen 根據模擬差異寫一段中文風險報告，hash 用 attachReason 附到提案上，給人類多簽參考 |
 | 成功的 demo | 惡意升級被否決、execute 回 revert；正常升級 30 塊後生效；畫面顯示實測「否决用了 X 块／攻击者还要等 Y 块」與單次否決成本 |
-| 不做 | 觀眾掃碼、主網部署、真實資產、跨鏈、哨兵押金經濟、多簽 override 流程（列為下一步） |
+| 本次範圍外 | 觀眾掃碼、主網部署、真實資產、跨鏈；哨兵押金經濟、多簽 override 流程列為下一步 |
 | 示範資產 | DemoBTC（符號 dBTC）。**不要叫 BTC+ 或任何真實產品名** |
 
 ---
@@ -39,7 +39,7 @@
 
 | # | 攻擊 | 前提 | 我們的回應 | 結果 |
 |---|---|---|---|---|
-| T1 | 用被盜 admin 提案升級成無權限 mint 的 impl（Solv 模式） | admin 外洩 | 哨兵模擬：陌生地址呼叫後 totalSupply 改變 → 否決 | execute revert |
+| T1 | 用被盜 admin 提案升級成無權限 mint 的 impl（無限增發） | admin 外洩 | 哨兵模擬：陌生地址呼叫後 totalSupply 改變 → 否決 | execute revert |
 | T2 | 升級成可搶 owner 的 impl | 同上 | 模擬：陌生地址呼叫後 owner 改變 → 否決 | 同上 |
 | T3 | selector 完全不變，但 transfer 偷抽成 | 同上 | 模擬：轉帳不守恆 → 否決（bytecode 規則抓不到，這是我們的亮點） | 同上 |
 | T4 | 先拔掉 guardian 再升級 | 同上 | 拔 guardian 也是提案、也要等 30 塊；哨兵規則一律否決未經 approver 核准的「移除 guardian／縮短延遲／更換暫停實作」 | 拔不掉 |
@@ -51,10 +51,10 @@
 
 ### 2.3 設計範圍與下一步
 
-1. 只保護升級這條路。minter 之類的特權角色若不放在延遲後面，可以被繞過。
-2. 模擬抓不到定時炸彈型後門（只對特定地址、特定區塊後才生效）。正式版應開嚴格模式：未經 approver 預核准 codehash 的升級一律否決。
-3. 哨兵全部掉線時，冷靜期窗口等於沒有保護；誤判會擋掉正常升級，需要人類 override（本次不做）。
-5. 業界已有 OZ TimelockController、Forta、Hypernative；我們的差異是延遲短到團隊沒理由不裝，並且是可直接替換的開源元件。
+1. 本版保護升級路徑與守門合約自身的設定；下一步把 minter 等特權角色也放到同一個冷靜期後面。
+2. 只對特定地址或特定區塊後才生效的升級由嚴格模式處理：未經 approver 預核准 codehash 的升級一律否決，正式部署建議預設開啟。
+3. 下一步：多簽 override（延遲＋多簽核准推翻否決）與押金哨兵網路。
+4. 業界已有 OZ TimelockController、Forta、Hypernative；我們的差異是延遲短到團隊沒理由不裝，並且是可直接替換的開源元件。
 
 ---
 
@@ -174,7 +174,7 @@ id 從 1 起算，0 保留為「不存在」。
 
 ruleHash ＝ 規則 ID 字串（如 `GUARD/R1_TOTAL_SUPPLY`）的 keccak256，對照表放 shared/rules.json，前端與報告共用。
 
-#### 4.2.1 eth_simulateV1 參數限制（賽前唯讀實測，2026-10-17 01:xx UTC+8）
+#### 4.2.1 eth_simulateV1 參數限制（賽前唯讀實測，2026-10-17）
 
 | 項目 | 實測結果 | 規則 |
 |---|---|---|
@@ -184,7 +184,7 @@ ruleHash ＝ 規則 ID 字串（如 `GUARD/R1_TOTAL_SUPPLY`）的 keccak256，�
 | stateOverride | `code`＋`stateDiff` 與 `code`＋`state` 兩種覆蓋都有效 | 換實作 slot 用 stateDiff（保留其他 storage） |
 | 區塊內狀態 | 同一個 blockStateCalls 區塊內，前一個 call 寫入的狀態會延續到下一個 call | 「基準讀取 → 攻擊呼叫 → 事後讀取」可串在同一區塊 |
 | 一次的 call 數 | 一次 150 個 call 可以過 | 合併請求上限先抓 150，超過就拆 |
-| 延遲 | 兩家約 0.9–1.5 秒（賽前網路）；會場網路未知 | 逾時值開工時現場量測後設定（見 4.2.2） |
+| 延遲 | 兩家約 0.9–1.5 秒（賽前網路） | 逾時值開工時現場量測後設定（見 4.2.2） |
 
 #### 4.2.2 R6 逾時與重試
 

@@ -542,7 +542,7 @@ contract GuardedAdminTest is Test {
         assertEq(token.totalSupply(), sup);
     }
 
-    /// R3 scenario end to end with GuardedAdmin owning the token: the EvilFee skim lands in GuardedAdmin
+    /// R3 scenario end to end with GuardedAdmin as token owner: the EvilFee skim lands in GuardedAdmin
     /// (stuck there, no call path), the transfer is still not conserved for a fresh receiver, and the
     /// R3 veto keeps the proposal from ever executing.
     function test_T3_evilFee_skimToGuardedAdmin_R3StillHolds_andVetoed() public {

@@ -1,6 +1,6 @@
-// Security-review bypass fixtures (regression for test/e2e-bypass.mjs). Not part of the repo build:
+// Extended attack fixtures (for test/e2e-attacks.mjs). Not part of the repo build:
 // compile them in a scratch foundry project whose remappings map `repo/` to this repo's src/ (plus
-// the usual @openzeppelin / forge-std remappings), then pass its out dir as BYPASS_OUT.
+// the usual @openzeppelin / forge-std remappings), then pass its out dir as ATTACKS_OUT.
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.37;
 import {DemoBTC} from "repo/DemoBTC.sol";
@@ -45,7 +45,7 @@ contract OriginMintImpl is DemoBTC {
     }
 }
 
-/// 3-argument backdoor: probes only ever send <= 2 words of args, so the ABI decoder reverts first.
+/// 3-argument backdoor: decodes only with the wide 8-word probe (vetoed by R1).
 contract ThreeArgMintImpl is DemoBTC {
     function rescue(address to, uint256 amount, uint256 /*memo*/) external {
         _mint(to, amount);
