@@ -867,8 +867,16 @@ main {
   font-size: 16px;
   line-height: 1.42;
 }
+/* 手动打开（R）：从第一句读起，往下滚动看全文 */
 .dock.manual .r-body {
   overflow-y: auto;
+  flex-direction: column;
+}
+/* 手动打开时面板往上长到放得下全文（最多再高 160px），自动浮现时维持原高度 */
+.dock.manual {
+  height: auto;
+  min-height: var(--stream-h);
+  max-height: calc(var(--stream-h) + 160px);
 }
 .caret {
   animation: pulse 0.5s infinite alternate;
