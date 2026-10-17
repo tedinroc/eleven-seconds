@@ -6,6 +6,8 @@
 #
 # Logs and PIDs go to .demo/ (git-ignored). Stop everything with demo/down.sh (it only kills the PIDs it started).
 # Options: LLM_DISABLE=0 to let the reporter use the local model (default 1 = templates only).
+#          DRIVER_APPROVE=1 to load the approver key into the driver (war room key A); off by default,
+#          otherwise approve with: node driver/approve.mjs --card v2
 set -euo pipefail
 MODE="${1:-testnet}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

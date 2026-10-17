@@ -3,7 +3,7 @@
 //
 //   POST /propose  {"card":"evilMint"|"evilOwner"|"evilFee"|"v2"|"v1"}   admin 送 proposeUpgrade(impl, 0x)
 //   POST /execute  {"id":"3"}      先 eth_call 拿错误名称，再用 gas.json 的固定 gas limit 真的送出
-//   POST /approve  {"card":"v2"} 或 {"codehash":"0x…"}   approver 送 approveCodehash（严格模式用）
+//   POST /approve  {"card":"v2"} 或 {"codehash":"0x…"}   approver 送 approveCodehash（严格模式用；预设关闭，见 DRIVER_APPROVE）
 //   POST /demo/sentinel {"n":3,"action":"stop"|"start"}   stage helper: stop or restart one sentinel (local only)
 //   GET  /events   SSE（spec 4.4：heartbeat、execute_attempt）   GET /health   GET /deployments
 //
@@ -18,6 +18,11 @@
 //                               钥匙只在执行期从档案读；本机 anvil 没给时用 anvil 公开测试帐号 1、5
 //   DRIVER_BROADCAST=1          非 anvil 链必须明确打开才会广播（只由操作者本人启动）
 //   AUTO_EXECUTE=0              关掉冷静期满自动 execute
+//   DRIVER_APPROVE=1            把 approver 钥匙载入 driver、开放 POST /approve（只在 demo 需要时开；平时用 node approve.mjs）
+//   DRIVER_ALLOWED_ORIGINS=a,b  浏览器 Origin 白名单（预设 http://127.0.0.1:5173,http://localhost:5173）
+//
+// HTTP 安全：只接受 Host 为本 driver（127.0.0.1／localhost:PORT）的请求、浏览器 Origin 必须在白名单、POST 必须是
+// application/json，且不送任何 CORS 标头——别的网页无法跨站呼叫（2026-10-17 审查 engineering-4）。
 //   PORT=8700
 import http from 'node:http'
 import { execFileSync, spawn } from 'node:child_process'
@@ -109,7 +114,9 @@ setInterval(() => {
 }, 3_000).unref?.()
 
 const admin = loadAccount('ADMIN', 'admin', 1, chainId)
-const approver = loadAccount('APPROVER', 'approver', 5, chainId)
+// approver 钥匙平时不常驻：能连到 driver 的东西就能核准任意 codehash。要用时以 DRIVER_APPROVE=1 启动，或用 approve.mjs
+const APPROVE_IN_DRIVER = process.env.DRIVER_APPROVE === '1'
+const approver = APPROVE_IN_DRIVER ? loadAccount('APPROVER', 'approver', 5, chainId) : null
 const adminSigner = admin ? new Signer(admin, chainId, rc(), sendPool) : null
 const approverSigner = approver ? new Signer(approver, chainId, rc(), sendPool) : null
 await Promise.allSettled([adminSigner?.syncNonce(), approverSigner?.syncNonce()])
@@ -438,6 +445,7 @@ async function finishExecute(d, sid, hash, rpcs, preflight, preflightArgs, timeo
 }
 
 async function approveFlow(body) {
+  if (!APPROVE_IN_DRIVER) throw httpErr(403, 'driver 没有开放核准：用 node driver/approve.mjs --card v2（或以 DRIVER_APPROVE=1 启动 driver）')
   const d = dep()
   requireBroadcast(approverSigner, 'approver')
   let codehash = body.codehash
@@ -465,13 +473,20 @@ async function approveFlow(body) {
 }
 
 // ---------- HTTP ----------
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'content-type',
+// 同源、本机：战情室经 Vite 的 /svc/driver 代理连进来，所以不送 CORS 标头（跨站的浏览器请求一律失败）。
+const ALLOWED_ORIGINS = new Set(list(process.env.DRIVER_ALLOWED_ORIGINS ?? 'http://127.0.0.1:5173,http://localhost:5173'))
+const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`])
+function checkRequest(req) {
+  const host = String(req.headers.host ?? '').toLowerCase()
+  if (!ALLOWED_HOSTS.has(host)) return httpErr(403, `host ${host || '(none)'} not allowed`) // DNS rebinding
+  const origin = req.headers.origin
+  if (origin !== undefined && !ALLOWED_ORIGINS.has(String(origin))) return httpErr(403, `origin ${origin} not allowed`)
+  // 跨站的 no-cors POST 只能带 text/plain 或表单；要 JSON 就得先过 preflight，而这里不批准任何 preflight
+  if (req.method === 'POST' && !/^application\/json\b/i.test(String(req.headers['content-type'] ?? ''))) return httpErr(415, 'content-type must be application/json')
+  return null
 }
 const json = (res, code, body) => {
-  res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', ...CORS })
+  res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' })
   res.end(JSON.stringify(body, (_k, v) => (typeof v === 'bigint' ? v.toString() : v)))
 }
 const readBody = (req) =>
@@ -526,13 +541,19 @@ function sentinelControl(n, action) {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost')
+  const denied = checkRequest(req)
+  if (denied) {
+    req.resume()
+    log(`refused ${req.method} ${url.pathname}: ${denied.message}`)
+    return json(res, denied.code, { error: denied.message })
+  }
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, CORS)
+    res.writeHead(204) // 不批准任何 CORS preflight
     return res.end()
   }
   try {
     if (req.method === 'GET' && url.pathname === '/events') {
-      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', ...CORS })
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' })
       res.write(': connected\n\n')
       const n = Math.min(Number(url.searchParams.get('backlog') ?? 0) || 0, backlog.length)
       for (const line of backlog.slice(backlog.length - n)) res.write(`data: ${line}\n\n`)
@@ -561,6 +582,7 @@ const server = http.createServer(async (req, res) => {
         broadcast: CAN_BROADCAST,
         admin: admin?.address ?? null,
         approver: approver?.address ?? null,
+        approveInDriver: APPROVE_IN_DRIVER,
         adminMatchesOwner: d && admin ? d.owner?.toLowerCase() === admin.address.toLowerCase() : null,
         abi: usingFallbackAbi() ? 'fallback(spec 3.3)' : 'shared/abi',
         gas: gasFromFile() ? 'shared/gas.json' : 'fallback',
