@@ -65,7 +65,9 @@ if [ "$BROADCAST" = "1" ]; then
   # codehashes = keccak256 of the deployed runtime code (what extcodehash / Proposed.codehash report)
   for k in v1 v2 evilMint evilOwner evilFee paused; do
     a="$(jq -r ".impls.$k" "$OUT")"
-    h="$(cast keccak "$(cast code "$a" --rpc-url "$RPC_URL")")"
+    code="0x"; for _ in 1 2 3 4 5; do code="$(cast code "$a" --rpc-url "$RPC_URL" 2>/dev/null || echo 0x)"; [ "$code" != "0x" ] && break; sleep 1; done
+    [ "$code" != "0x" ] || { echo "could not read code for $k at $a" >&2; exit 1; }
+    h="$(cast keccak "$code")"
     tmp="$(mktemp)"; jq --arg k "$k" --arg h "$h" '.codehashes[$k] = $h' "$OUT" > "$tmp" && mv "$tmp" "$OUT"
   done
   echo "codehashes recomputed from on-chain code"

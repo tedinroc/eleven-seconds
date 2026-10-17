@@ -1,0 +1,48 @@
+{
+  "approver": "0xF87d27A41c39b4ECCFbcfb3B64A31A600eE07849",
+  "chainId": 10143,
+  "codehashes": {
+    "evilFee": "0xe6fbfde45ea17b8b6c8cb54d3a3d9cc940350497738cd9bfbeb3ff53c059395f",
+    "evilMint": "0xcfbe77b285f6d2d913d017dfcc2cd18590b9b2ddbd4ab77ab339e4defd701f68",
+    "evilOwner": "0x82598a005afe4fda4aeefa00e492f32208753224d9f75e0feabebd81cbd31027",
+    "paused": "0x39e3654ebdf1aa2c7cc763dca1092193ee8dfa531974e40924500cb55dfab5fe",
+    "v1": "0xabe595489b9d6797b5be8abb8aece47c4ba194656fcc84b91b7e571a4f6b7eab",
+    "v2": "0xa82c68dea44388a1285d4f08bf1675b4af8571f4cf95a010ca852a5c1f5ff464"
+  },
+  "delayBlocks": 30,
+  "deployBlock": 71718143,
+  "deployer": "0x688EA5F35bA0497abbD977883149675c078A8819",
+  "guardedAdmin": "0x57a84DCaDB3C29aeF27Cd5d7f3A3Af2C27F25ef4",
+  "guardians": [
+    "0x7ED9Ba0811657e8DdA25feF898da48160F45EF3b",
+    "0xd662B28468B28cB24f6617d3777A385bDB116B68",
+    "0x94b56d19E893d5Cd04f6060760881f3f494C98bE"
+  ],
+  "holderAmounts": [
+    10000000000,
+    5000000000,
+    2500000000
+  ],
+  "holders": [
+    "0x67Ae300961e3A36CB5B951513514AD7e3e404c1a",
+    "0xF0c1298177330D3Df8a772E26a337276f0D1189E",
+    "0x785C83E710Ab7392b503073236eDd7dBbeA4c7B5"
+  ],
+  "impls": {
+    "evilFee": "0x68E90762e9914328Af6A3eA3aA914471124aF1d1",
+    "evilMint": "0x074E2C925d2621479226d9A277e90AF2B724B8A2",
+    "evilOwner": "0x712Cc2780419a06f15fF3c7D1DA47C6Ee4875659",
+    "paused": "0xd04Ba153293d643C696f3076051A89422447d4EB",
+    "v1": "0x05aB95D20800870939605Fb57fc12c09c2fC5547",
+    "v2": "0xFb68bF421c64ef5efBa05B16B8a8C64a3b1fE5BA"
+  },
+  "network": "monad-testnet",
+  "owner": "0x40dc2018326447b29CA753F981ECc9b7de090943",
+  "proxy": "0xE851E12bb9987F40A5f605eb0c8008Dce6eEB3A8",
+  "proxyAdmin": "0x446d8bCD6365421fAf2BA00e1912A7A695E2caEf",
+  "token": {
+    "decimals": 8,
+    "name": "DemoBTC",
+    "symbol": "dBTC"
+  }
+}
