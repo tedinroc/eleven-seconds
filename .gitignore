@@ -30,3 +30,6 @@ node_modules
 # forge dry runs and local report archive
 broadcast/*/*/dry-run/
 reporter/reports/
+
+# demo/up.sh logs and PIDs
+.demo/
